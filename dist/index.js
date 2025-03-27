@@ -30840,7 +30840,6 @@ async function run() {
             items(first: 100) {
               nodes {
                 id
-                contentId
                 content {
                   ... on Issue {
                     id

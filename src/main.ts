@@ -162,7 +162,6 @@ export async function run(): Promise<void> {
             items(first: 100) {
               nodes {
                 id
-                contentId
                 content {
                   ... on Issue {
                     id

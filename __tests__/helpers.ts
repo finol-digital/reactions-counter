@@ -23,7 +23,6 @@ export interface ProjectItemsQueryResponse {
       items: {
         nodes: Array<{
           id: string
-          contentId: string
           content: {
             id: string
             number: number
@@ -110,7 +109,6 @@ export const mockProjectItemsResponse: GraphQLResponse<ProjectItemsQueryResponse
           nodes: [
             {
               id: 'item-1',
-              contentId: 'issue-1',
               content: {
                 id: 'issue-1',
                 number: 1,
