@@ -30774,6 +30774,8 @@ var Octokit = Octokit$1.plugin(
 /**
  * The main function for the action.
  * Counts reactions on GitHub Issues and updates a corresponding GitHub Project with the count.
+ *
+ * @returns Resolves when the action is complete.
  */
 async function run() {
     try {

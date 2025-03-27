@@ -71,6 +71,8 @@ interface UpdateMutationResponse {
 /**
  * The main function for the action.
  * Counts reactions on GitHub Issues and updates a corresponding GitHub Project with the count.
+ *
+ * @returns Resolves when the action is complete.
  */
 export async function run(): Promise<void> {
   try {
