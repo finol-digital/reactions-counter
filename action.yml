@@ -1,16 +1,19 @@
 name: Reactions Counter
-description: Counts reactions on GitHub Issues and updates a corresponding GitHub Project with the count
+description:
+  Counts reactions on GitHub Issues and updates a corresponding GitHub Project
+  with the count
 author: David Finol
 
 # Add your action's branding here. This will appear on the GitHub Marketplace.
 branding:
   icon: counter
-  color: blue
+  color: red
 
 # Define your inputs here.
 inputs:
   project-url:
     description: The URL of the GitHub Project to update
+    required: true
   github-token:
     description: The GitHub token to use
     required: true
