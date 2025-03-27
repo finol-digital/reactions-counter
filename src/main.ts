@@ -163,6 +163,46 @@ export async function run(): Promise<void> {
                       }
                       number
                     }
+                    ... on ProjectV2ItemFieldTextValue {
+                      field {
+                        ... on ProjectV2Field {
+                          id
+                          name
+                          dataType
+                        }
+                      }
+                      text
+                    }
+                    ... on ProjectV2ItemFieldDateValue {
+                      field {
+                        ... on ProjectV2Field {
+                          id
+                          name
+                          dataType
+                        }
+                      }
+                      date
+                    }
+                    ... on ProjectV2ItemFieldSingleSelectValue {
+                      field {
+                        ... on ProjectV2Field {
+                          id
+                          name
+                          dataType
+                        }
+                      }
+                      optionId
+                    }
+                    ... on ProjectV2ItemFieldIterationValue {
+                      field {
+                        ... on ProjectV2Field {
+                          id
+                          name
+                          dataType
+                        }
+                      }
+                      iterationId
+                    }
                   }
                 }
               }
