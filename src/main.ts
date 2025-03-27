@@ -25,7 +25,6 @@ interface ProjectItemsQueryResponse {
     items: {
       nodes: Array<{
         id: string
-        contentId: string
         content: {
           id: string
           number: number
@@ -42,7 +41,11 @@ interface ProjectItemsQueryResponse {
               name: string
               dataType: string
             }
-            number: number
+            number?: number
+            text?: string
+            date?: string
+            optionId?: string
+            iterationId?: string
           }>
         }
       }>
@@ -96,18 +99,28 @@ export async function run(): Promise<void> {
     const [, org, repo, projectNumber] = projectUrlMatch
 
     // Get project ID
-    const project = await octokit.graphql<
-      GraphQLResponse<ProjectQueryResponse>
-    >(
+    const project = await octokit.graphql<ProjectQueryResponse>(
       `query getProject($org: String!, $repo: String!, $number: Int!) {
         repository(owner: $org, name: $repo) {
           projectV2(number: $number) {
             id
             fields(first: 100) {
               nodes {
-                id
-                name
-                dataType
+                ... on ProjectV2Field {
+                  id
+                  name
+                  dataType
+                }
+                ... on ProjectV2IterationField {
+                  id
+                  name
+                  dataType
+                }
+                ... on ProjectV2SingleSelectField {
+                  id
+                  name
+                  dataType
+                }
               }
             }
           }
@@ -120,8 +133,17 @@ export async function run(): Promise<void> {
       }
     )
 
-    const projectId = project.data.repository.projectV2.id
-    const fields = project.data.repository.projectV2.fields.nodes
+    // Add debugging
+    core.debug(`Project response: ${JSON.stringify(project, null, 2)}`)
+
+    if (!project?.repository?.projectV2) {
+      throw new Error(
+        'Failed to get project data. Response: ' + JSON.stringify(project)
+      )
+    }
+
+    const projectId = project.repository.projectV2.id
+    const fields = project.repository.projectV2.fields.nodes
 
     // Find the target field
     const targetField = fields.find((field) => field.name === fieldName)
@@ -130,16 +152,13 @@ export async function run(): Promise<void> {
     }
 
     // Get project items
-    const items = await octokit.graphql<
-      GraphQLResponse<ProjectItemsQueryResponse>
-    >(
+    const items = await octokit.graphql<ProjectItemsQueryResponse>(
       `query getProjectItems($projectId: ID!) {
         node(id: $projectId) {
           ... on ProjectV2 {
             items(first: 100) {
               nodes {
                 id
-                contentId
                 content {
                   ... on Issue {
                     id
@@ -163,6 +182,46 @@ export async function run(): Promise<void> {
                       }
                       number
                     }
+                    ... on ProjectV2ItemFieldTextValue {
+                      field {
+                        ... on ProjectV2Field {
+                          id
+                          name
+                          dataType
+                        }
+                      }
+                      text
+                    }
+                    ... on ProjectV2ItemFieldDateValue {
+                      field {
+                        ... on ProjectV2Field {
+                          id
+                          name
+                          dataType
+                        }
+                      }
+                      date
+                    }
+                    ... on ProjectV2ItemFieldSingleSelectValue {
+                      field {
+                        ... on ProjectV2Field {
+                          id
+                          name
+                          dataType
+                        }
+                      }
+                      optionId
+                    }
+                    ... on ProjectV2ItemFieldIterationValue {
+                      field {
+                        ... on ProjectV2Field {
+                          id
+                          name
+                          dataType
+                        }
+                      }
+                      iterationId
+                    }
                   }
                 }
               }
@@ -175,7 +234,7 @@ export async function run(): Promise<void> {
       }
     )
 
-    const projectItems = items.data.node.items.nodes
+    const projectItems = items.node.items.nodes
 
     // Update each item with reaction count
     for (const item of projectItems) {
@@ -186,7 +245,7 @@ export async function run(): Promise<void> {
 
       // Find the current value of the target field
       const currentValue = item.fieldValues.nodes.find(
-        (value) => value.field.name === fieldName
+        (value) => value.field?.name === fieldName
       )
 
       // Only update if the value has changed

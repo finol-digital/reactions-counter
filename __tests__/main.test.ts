@@ -81,19 +81,17 @@ describe('Reactions Counter Action', () => {
 
   it('should handle missing field', async () => {
     mockGraphQL.mockResolvedValueOnce({
-      data: {
-        repository: {
-          projectV2: {
-            id: 'project-1',
-            fields: {
-              nodes: [
-                {
-                  id: 'field-1',
-                  name: 'Other Field',
-                  dataType: 'NUMBER'
-                }
-              ]
-            }
+      repository: {
+        projectV2: {
+          id: 'project-1',
+          fields: {
+            nodes: [
+              {
+                id: 'field-1',
+                name: 'Other Field',
+                dataType: 'NUMBER'
+              }
+            ]
           }
         }
       }
@@ -118,20 +116,17 @@ describe('Reactions Counter Action', () => {
     mockGraphQL
       .mockResolvedValueOnce(mockProjectQueryResponse)
       .mockResolvedValueOnce({
-        data: {
-          node: {
-            items: {
-              nodes: [
-                {
-                  id: 'item-1',
-                  contentId: 'issue-1',
-                  content: null,
-                  fieldValues: {
-                    nodes: []
-                  }
+        node: {
+          items: {
+            nodes: [
+              {
+                id: 'item-1',
+                content: null,
+                fieldValues: {
+                  nodes: []
                 }
-              ]
-            }
+              }
+            ]
           }
         }
       })
@@ -145,35 +140,32 @@ describe('Reactions Counter Action', () => {
     mockGraphQL
       .mockResolvedValueOnce(mockProjectQueryResponse)
       .mockResolvedValueOnce({
-        data: {
-          node: {
-            items: {
-              nodes: [
-                {
-                  id: 'item-1',
-                  contentId: 'issue-1',
-                  content: {
-                    id: 'issue-1',
-                    number: 1,
-                    reactions: {
-                      nodes: [{ content: '👍' }, { content: '❤️' }]
-                    }
-                  },
-                  fieldValues: {
-                    nodes: [
-                      {
-                        field: {
-                          id: 'field-1',
-                          name: 'Reactions',
-                          dataType: 'NUMBER'
-                        },
-                        number: 2
-                      }
-                    ]
+        node: {
+          items: {
+            nodes: [
+              {
+                id: 'item-1',
+                content: {
+                  id: 'issue-1',
+                  number: 1,
+                  reactions: {
+                    nodes: [{ content: '👍' }, { content: '❤️' }]
                   }
+                },
+                fieldValues: {
+                  nodes: [
+                    {
+                      field: {
+                        id: 'field-1',
+                        name: 'Reactions',
+                        dataType: 'NUMBER'
+                      },
+                      number: 2
+                    }
+                  ]
                 }
-              ]
-            }
+              }
+            ]
           }
         }
       })
@@ -181,5 +173,6 @@ describe('Reactions Counter Action', () => {
     await run()
 
     expect(core.setOutput).toHaveBeenCalledWith('status', 'success')
+    expect(mockGraphQL).toHaveBeenCalledTimes(2) // Only the first two queries, no update
   })
 })

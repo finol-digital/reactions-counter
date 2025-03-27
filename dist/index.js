@@ -30797,9 +30797,21 @@ async function run() {
             id
             fields(first: 100) {
               nodes {
-                id
-                name
-                dataType
+                ... on ProjectV2Field {
+                  id
+                  name
+                  dataType
+                }
+                ... on ProjectV2IterationField {
+                  id
+                  name
+                  dataType
+                }
+                ... on ProjectV2SingleSelectField {
+                  id
+                  name
+                  dataType
+                }
               }
             }
           }
@@ -30809,8 +30821,13 @@ async function run() {
             repo,
             number: parseInt(projectNumber, 10)
         });
-        const projectId = project.data.repository.projectV2.id;
-        const fields = project.data.repository.projectV2.fields.nodes;
+        // Add debugging
+        coreExports.debug(`Project response: ${JSON.stringify(project, null, 2)}`);
+        if (!project?.repository?.projectV2) {
+            throw new Error('Failed to get project data. Response: ' + JSON.stringify(project));
+        }
+        const projectId = project.repository.projectV2.id;
+        const fields = project.repository.projectV2.fields.nodes;
         // Find the target field
         const targetField = fields.find((field) => field.name === fieldName);
         if (!targetField) {
@@ -30823,7 +30840,6 @@ async function run() {
             items(first: 100) {
               nodes {
                 id
-                contentId
                 content {
                   ... on Issue {
                     id
@@ -30847,6 +30863,46 @@ async function run() {
                       }
                       number
                     }
+                    ... on ProjectV2ItemFieldTextValue {
+                      field {
+                        ... on ProjectV2Field {
+                          id
+                          name
+                          dataType
+                        }
+                      }
+                      text
+                    }
+                    ... on ProjectV2ItemFieldDateValue {
+                      field {
+                        ... on ProjectV2Field {
+                          id
+                          name
+                          dataType
+                        }
+                      }
+                      date
+                    }
+                    ... on ProjectV2ItemFieldSingleSelectValue {
+                      field {
+                        ... on ProjectV2Field {
+                          id
+                          name
+                          dataType
+                        }
+                      }
+                      optionId
+                    }
+                    ... on ProjectV2ItemFieldIterationValue {
+                      field {
+                        ... on ProjectV2Field {
+                          id
+                          name
+                          dataType
+                        }
+                      }
+                      iterationId
+                    }
                   }
                 }
               }
@@ -30856,7 +30912,7 @@ async function run() {
       }`, {
             projectId
         });
-        const projectItems = items.data.node.items.nodes;
+        const projectItems = items.node.items.nodes;
         // Update each item with reaction count
         for (const item of projectItems) {
             if (!item.content)
@@ -30864,7 +30920,7 @@ async function run() {
             const issue = item.content;
             const reactionCount = issue.reactions.nodes.length;
             // Find the current value of the target field
-            const currentValue = item.fieldValues.nodes.find((value) => value.field.name === fieldName);
+            const currentValue = item.fieldValues.nodes.find((value) => value.field?.name === fieldName);
             // Only update if the value has changed
             if (currentValue?.number !== reactionCount) {
                 await octokit.graphql(`mutation updateProjectItemFieldValue($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: Float!) {
