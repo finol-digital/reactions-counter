@@ -6,17 +6,15 @@ interface GraphQLResponse<T> {
 }
 
 interface ProjectQueryResponse {
-  data: {
-    repository: {
-      projectV2: {
-        id: string
-        fields: {
-          nodes: Array<{
-            id: string
-            name: string
-            dataType: string
-          }>
-        }
+  repository: {
+    projectV2: {
+      id: string
+      fields: {
+        nodes: Array<{
+          id: string
+          name: string
+          dataType: string
+        }>
       }
     }
   }
@@ -141,14 +139,14 @@ export async function run(): Promise<void> {
     // Add debugging
     core.debug(`Project response: ${JSON.stringify(project, null, 2)}`)
 
-    if (!project?.data?.repository?.projectV2) {
+    if (!project?.repository?.projectV2) {
       throw new Error(
         'Failed to get project data. Response: ' + JSON.stringify(project)
       )
     }
 
-    const projectId = project.data.repository.projectV2.id
-    const fields = project.data.repository.projectV2.fields.nodes
+    const projectId = project.repository.projectV2.id
+    const fields = project.repository.projectV2.fields.nodes
 
     // Find the target field
     const targetField = fields.find((field) => field.name === fieldName)

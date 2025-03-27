@@ -1,6 +1,6 @@
 import { jest } from '@jest/globals'
 
-export type GraphQLResponse<T> = { data: T }
+export type GraphQLResponse<T> = T
 
 export interface ProjectQueryResponse {
   repository: {
@@ -18,20 +18,46 @@ export interface ProjectQueryResponse {
 }
 
 export interface ProjectItemsQueryResponse {
-  node: {
-    items: {
-      nodes: Array<{
-        id: string
-        contentId: string
-        content: {
+  data: {
+    node: {
+      items: {
+        nodes: Array<{
           id: string
-          number: number
-          reactions: {
+          contentId: string
+          content: {
+            id: string
+            number: number
+            reactions: {
+              nodes: Array<{
+                content: string
+              }>
+            }
+          } | null
+          fieldValues: {
             nodes: Array<{
-              content: string
+              field: {
+                id: string
+                name: string
+                dataType: string
+              }
+              number?: number
+              text?: string
+              date?: string
+              optionId?: string
+              iterationId?: string
             }>
           }
-        } | null
+        }>
+      }
+    }
+  }
+}
+
+export interface UpdateMutationResponse {
+  data: {
+    updateProjectV2ItemFieldValue: {
+      projectV2Item: {
+        id: string
         fieldValues: {
           nodes: Array<{
             field: {
@@ -42,24 +68,6 @@ export interface ProjectItemsQueryResponse {
             number: number
           }>
         }
-      }>
-    }
-  }
-}
-
-export interface UpdateMutationResponse {
-  updateProjectV2ItemFieldValue: {
-    projectV2Item: {
-      id: string
-      fieldValues: {
-        nodes: Array<{
-          field: {
-            id: string
-            name: string
-            dataType: string
-          }
-          number: number
-        }>
       }
     }
   }
@@ -72,25 +80,23 @@ export type GraphQLResponseType = GraphQLResponse<
 export const createMockGraphQL = () => {
   const mockGraphQL = jest.fn()
   mockGraphQL.mockImplementation(() =>
-    Promise.resolve({ data: {} } as GraphQLResponseType)
+    Promise.resolve({} as GraphQLResponseType)
   )
   return mockGraphQL as jest.Mock<any>
 }
 
 export const mockProjectQueryResponse: GraphQLResponse<ProjectQueryResponse> = {
-  data: {
-    repository: {
-      projectV2: {
-        id: 'project-1',
-        fields: {
-          nodes: [
-            {
-              id: 'field-1',
-              name: 'Reactions',
-              dataType: 'NUMBER'
-            }
-          ]
-        }
+  repository: {
+    projectV2: {
+      id: 'project-1',
+      fields: {
+        nodes: [
+          {
+            id: 'field-1',
+            name: 'Reactions',
+            dataType: 'NUMBER'
+          }
+        ]
       }
     }
   }

@@ -81,19 +81,17 @@ describe('Reactions Counter Action', () => {
 
   it('should handle missing field', async () => {
     mockGraphQL.mockResolvedValueOnce({
-      data: {
-        repository: {
-          projectV2: {
-            id: 'project-1',
-            fields: {
-              nodes: [
-                {
-                  id: 'field-1',
-                  name: 'Other Field',
-                  dataType: 'NUMBER'
-                }
-              ]
-            }
+      repository: {
+        projectV2: {
+          id: 'project-1',
+          fields: {
+            nodes: [
+              {
+                id: 'field-1',
+                name: 'Other Field',
+                dataType: 'NUMBER'
+              }
+            ]
           }
         }
       }
