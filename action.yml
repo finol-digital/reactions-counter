@@ -6,7 +6,7 @@ author: David Finol
 
 # Add your action's branding here. This will appear on the GitHub Marketplace.
 branding:
-  icon: counter
+  icon: activity
   color: red
 
 # Define your inputs here.
@@ -20,6 +20,11 @@ inputs:
   field-name:
     description: The name of the field to update
     required: true
+
+# Define your outputs here.
+outputs:
+  status:
+    description: The status of the action
 
 runs:
   using: node20
