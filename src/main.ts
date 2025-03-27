@@ -245,7 +245,7 @@ export async function run(): Promise<void> {
 
       // Find the current value of the target field
       const currentValue = item.fieldValues.nodes.find(
-        (value) => value.field.name === fieldName
+        (value) => value.field?.name === fieldName
       )
 
       // Only update if the value has changed

@@ -30920,7 +30920,7 @@ async function run() {
             const issue = item.content;
             const reactionCount = issue.reactions.nodes.length;
             // Find the current value of the target field
-            const currentValue = item.fieldValues.nodes.find((value) => value.field.name === fieldName);
+            const currentValue = item.fieldValues.nodes.find((value) => value.field?.name === fieldName);
             // Only update if the value has changed
             if (currentValue?.number !== reactionCount) {
                 await octokit.graphql(`mutation updateProjectItemFieldValue($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: Float!) {

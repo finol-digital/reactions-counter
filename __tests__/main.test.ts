@@ -173,5 +173,6 @@ describe('Reactions Counter Action', () => {
     await run()
 
     expect(core.setOutput).toHaveBeenCalledWith('status', 'success')
+    expect(mockGraphQL).toHaveBeenCalledTimes(2) // Only the first two queries, no update
   })
 })
