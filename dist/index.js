@@ -30797,9 +30797,21 @@ async function run() {
             id
             fields(first: 100) {
               nodes {
-                id
-                name
-                dataType
+                ... on ProjectV2Field {
+                  id
+                  name
+                  dataType
+                }
+                ... on ProjectV2IterationField {
+                  id
+                  name
+                  dataType
+                }
+                ... on ProjectV2SingleSelectField {
+                  id
+                  name
+                  dataType
+                }
               }
             }
           }
