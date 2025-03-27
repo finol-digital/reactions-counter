@@ -6,46 +6,54 @@ interface GraphQLResponse<T> {
 }
 
 interface ProjectQueryResponse {
-  repository: {
-    projectV2: {
-      id: string
-      fields: {
-        nodes: Array<{
-          id: string
-          name: string
-          dataType: string
-        }>
+  data: {
+    repository: {
+      projectV2: {
+        id: string
+        fields: {
+          nodes: Array<{
+            id: string
+            name: string
+            dataType: string
+          }>
+        }
       }
     }
   }
 }
 
 interface ProjectItemsQueryResponse {
-  node: {
-    items: {
-      nodes: Array<{
-        id: string
-        contentId: string
-        content: {
+  data: {
+    node: {
+      items: {
+        nodes: Array<{
           id: string
-          number: number
-          reactions: {
+          contentId: string
+          content: {
+            id: string
+            number: number
+            reactions: {
+              nodes: Array<{
+                content: string
+              }>
+            }
+          } | null
+          fieldValues: {
             nodes: Array<{
-              content: string
+              field: {
+                id: string
+                name: string
+                dataType: string
+              }
+              number?: number
+              text?: string
+              date?: string
+              optionId?: string
+              iterationId?: string
             }>
           }
-        } | null
-        fieldValues: {
-          nodes: Array<{
-            field: {
-              id: string
-              name: string
-              dataType: string
-            }
-            number: number
-          }>
-        }
-      }>
+        }>
+      }
     }
   }
 }
@@ -96,9 +104,7 @@ export async function run(): Promise<void> {
     const [, org, repo, projectNumber] = projectUrlMatch
 
     // Get project ID
-    const project = await octokit.graphql<
-      GraphQLResponse<ProjectQueryResponse>
-    >(
+    const project = await octokit.graphql<ProjectQueryResponse>(
       `query getProject($org: String!, $repo: String!, $number: Int!) {
         repository(owner: $org, name: $repo) {
           projectV2(number: $number) {
@@ -142,9 +148,7 @@ export async function run(): Promise<void> {
     }
 
     // Get project items
-    const items = await octokit.graphql<
-      GraphQLResponse<ProjectItemsQueryResponse>
-    >(
+    const items = await octokit.graphql<ProjectItemsQueryResponse>(
       `query getProjectItems($projectId: ID!) {
         node(id: $projectId) {
           ... on ProjectV2 {
