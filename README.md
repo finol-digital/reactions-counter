@@ -31,11 +31,11 @@ steps:
 
 ### Inputs
 
-| Input          | Description                                                                                   | Required |
-| -------------- | --------------------------------------------------------------------------------------------- | -------- |
-| `project-url`  | The URL of the GitHub Project to update (format: https://github.com/org/repo/projects/number) | Yes      |
-| `github-token` | The GitHub token to use for authentication                                                    | Yes      |
-| `field-name`   | The name of the field in the GitHub Project to update with the reaction count                 | Yes      |
+| Input          | Description                                                                                     | Required |
+| -------------- | ----------------------------------------------------------------------------------------------- | -------- |
+| `project-url`  | The URL of the GitHub Project to update (format: <https://github.com/org/repo/projects/number>) | Yes      |
+| `github-token` | The GitHub token to use for authentication                                                      | Yes      |
+| `field-name`   | The name of the field in the GitHub Project to update with the reaction count                   | Yes      |
 
 ### Outputs
 
@@ -61,7 +61,7 @@ jobs:
       - name: Count Reactions
         uses: finol-digital/reactions-counter@v1
         with:
-          project-url: 'https://github.com/finol-difital/Card-Game-Simulator/projects/1'
+          project-url: 'https://github.com/finol-digital/Card-Game-Simulator/projects/1'
           github-token: ${{ secrets.CGS_PAT }}
           field-name: 'Reactions'
 ```
