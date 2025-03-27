@@ -30821,6 +30821,11 @@ async function run() {
             repo,
             number: parseInt(projectNumber, 10)
         });
+        // Add debugging
+        coreExports.debug(`Project response: ${JSON.stringify(project, null, 2)}`);
+        if (!project?.data?.repository?.projectV2) {
+            throw new Error('Failed to get project data. Response: ' + JSON.stringify(project));
+        }
         const projectId = project.data.repository.projectV2.id;
         const fields = project.data.repository.projectV2.fields.nodes;
         // Find the target field
