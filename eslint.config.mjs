@@ -68,6 +68,7 @@ export default [
 
     rules: {
       camelcase: 'off',
+      '@typescript-eslint/no-explicit-any': 'warn',
       'eslint-comments/no-use': 'off',
       'eslint-comments/no-unused-disable': 'off',
       'i18n-text/no-en': 'off',
