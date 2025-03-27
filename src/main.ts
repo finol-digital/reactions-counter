@@ -21,37 +21,34 @@ interface ProjectQueryResponse {
 }
 
 interface ProjectItemsQueryResponse {
-  data: {
-    node: {
-      items: {
-        nodes: Array<{
+  node: {
+    items: {
+      nodes: Array<{
+        id: string
+        content: {
           id: string
-          contentId: string
-          content: {
-            id: string
-            number: number
-            reactions: {
-              nodes: Array<{
-                content: string
-              }>
-            }
-          } | null
-          fieldValues: {
+          number: number
+          reactions: {
             nodes: Array<{
-              field: {
-                id: string
-                name: string
-                dataType: string
-              }
-              number?: number
-              text?: string
-              date?: string
-              optionId?: string
-              iterationId?: string
+              content: string
             }>
           }
-        }>
-      }
+        } | null
+        fieldValues: {
+          nodes: Array<{
+            field: {
+              id: string
+              name: string
+              dataType: string
+            }
+            number?: number
+            text?: string
+            date?: string
+            optionId?: string
+            iterationId?: string
+          }>
+        }
+      }>
     }
   }
 }
@@ -237,7 +234,7 @@ export async function run(): Promise<void> {
       }
     )
 
-    const projectItems = items.data.node.items.nodes
+    const projectItems = items.node.items.nodes
 
     // Update each item with reaction count
     for (const item of projectItems) {

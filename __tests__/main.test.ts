@@ -116,20 +116,17 @@ describe('Reactions Counter Action', () => {
     mockGraphQL
       .mockResolvedValueOnce(mockProjectQueryResponse)
       .mockResolvedValueOnce({
-        data: {
-          node: {
-            items: {
-              nodes: [
-                {
-                  id: 'item-1',
-                  contentId: 'issue-1',
-                  content: null,
-                  fieldValues: {
-                    nodes: []
-                  }
+        node: {
+          items: {
+            nodes: [
+              {
+                id: 'item-1',
+                content: null,
+                fieldValues: {
+                  nodes: []
                 }
-              ]
-            }
+              }
+            ]
           }
         }
       })
@@ -143,35 +140,32 @@ describe('Reactions Counter Action', () => {
     mockGraphQL
       .mockResolvedValueOnce(mockProjectQueryResponse)
       .mockResolvedValueOnce({
-        data: {
-          node: {
-            items: {
-              nodes: [
-                {
-                  id: 'item-1',
-                  contentId: 'issue-1',
-                  content: {
-                    id: 'issue-1',
-                    number: 1,
-                    reactions: {
-                      nodes: [{ content: '👍' }, { content: '❤️' }]
-                    }
-                  },
-                  fieldValues: {
-                    nodes: [
-                      {
-                        field: {
-                          id: 'field-1',
-                          name: 'Reactions',
-                          dataType: 'NUMBER'
-                        },
-                        number: 2
-                      }
-                    ]
+        node: {
+          items: {
+            nodes: [
+              {
+                id: 'item-1',
+                content: {
+                  id: 'issue-1',
+                  number: 1,
+                  reactions: {
+                    nodes: [{ content: '👍' }, { content: '❤️' }]
                   }
+                },
+                fieldValues: {
+                  nodes: [
+                    {
+                      field: {
+                        id: 'field-1',
+                        name: 'Reactions',
+                        dataType: 'NUMBER'
+                      },
+                      number: 2
+                    }
+                  ]
                 }
-              ]
-            }
+              }
+            ]
           }
         }
       })

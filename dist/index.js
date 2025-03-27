@@ -30912,7 +30912,7 @@ async function run() {
       }`, {
             projectId
         });
-        const projectItems = items.data.node.items.nodes;
+        const projectItems = items.node.items.nodes;
         // Update each item with reaction count
         for (const item of projectItems) {
             if (!item.content)

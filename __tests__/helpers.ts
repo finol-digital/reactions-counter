@@ -18,36 +18,34 @@ export interface ProjectQueryResponse {
 }
 
 export interface ProjectItemsQueryResponse {
-  data: {
-    node: {
-      items: {
-        nodes: Array<{
+  node: {
+    items: {
+      nodes: Array<{
+        id: string
+        content: {
           id: string
-          content: {
-            id: string
-            number: number
-            reactions: {
-              nodes: Array<{
-                content: string
-              }>
-            }
-          } | null
-          fieldValues: {
+          number: number
+          reactions: {
             nodes: Array<{
-              field: {
-                id: string
-                name: string
-                dataType: string
-              }
-              number?: number
-              text?: string
-              date?: string
-              optionId?: string
-              iterationId?: string
+              content: string
             }>
           }
-        }>
-      }
+        } | null
+        fieldValues: {
+          nodes: Array<{
+            field: {
+              id: string
+              name: string
+              dataType: string
+            }
+            number?: number
+            text?: string
+            date?: string
+            optionId?: string
+            iterationId?: string
+          }>
+        }
+      }>
     }
   }
 }
@@ -103,34 +101,32 @@ export const mockProjectQueryResponse: GraphQLResponse<ProjectQueryResponse> = {
 
 export const mockProjectItemsResponse: GraphQLResponse<ProjectItemsQueryResponse> =
   {
-    data: {
-      node: {
-        items: {
-          nodes: [
-            {
-              id: 'item-1',
-              content: {
-                id: 'issue-1',
-                number: 1,
-                reactions: {
-                  nodes: [{ content: '👍' }, { content: '❤️' }]
-                }
-              },
-              fieldValues: {
-                nodes: [
-                  {
-                    field: {
-                      id: 'field-1',
-                      name: 'Reactions',
-                      dataType: 'NUMBER'
-                    },
-                    number: 1
-                  }
-                ]
+    node: {
+      items: {
+        nodes: [
+          {
+            id: 'item-1',
+            content: {
+              id: 'issue-1',
+              number: 1,
+              reactions: {
+                nodes: [{ content: '👍' }, { content: '❤️' }]
               }
+            },
+            fieldValues: {
+              nodes: [
+                {
+                  field: {
+                    id: 'field-1',
+                    name: 'Reactions',
+                    dataType: 'NUMBER'
+                  },
+                  number: 1
+                }
+              ]
             }
-          ]
-        }
+          }
+        ]
       }
     }
   }
