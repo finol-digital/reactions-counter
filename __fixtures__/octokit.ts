@@ -79,14 +79,14 @@ export const mockUpdateMutationResponse: GraphQLResponse<UpdateMutationResponse>
 
 export class Octokit {
   graphql = jest.fn().mockImplementation(async (query: any) => {
-    if (query.includes('getProject')) {
-      return mockProjectQueryResponse
+    if (query.includes('updateProjectItemFieldValue')) {
+      return mockUpdateMutationResponse
     }
     if (query.includes('getProjectItems')) {
       return mockProjectItemsResponse
     }
-    if (query.includes('updateProjectItemFieldValue')) {
-      return mockUpdateMutationResponse
+    if (query.includes('getProject')) {
+      return mockProjectQueryResponse
     }
     throw new Error(`Unexpected query: ${query}`)
   })

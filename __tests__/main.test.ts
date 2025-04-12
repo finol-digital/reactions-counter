@@ -34,7 +34,7 @@ describe('Reactions Counter Action', () => {
 
     await run()
 
-    expect(core.setFailed).toHaveBeenCalledWith('status', 'success')
+    expect(core.setOutput).toHaveBeenCalledWith('status', 'success')
   })
 
   it('should handle invalid project URL', async () => {
@@ -59,7 +59,7 @@ describe('Reactions Counter Action', () => {
   })
   /*
     it('should handle missing field', async () => {
-      Octokit.Octokit()graphql.mockImplementation(() =>
+      Octokit.octokit.graphql.mockImplementation(() =>
         Promise.resolve({
           repository: {
             projectV2: {
@@ -85,7 +85,6 @@ describe('Reactions Counter Action', () => {
       )
     })
   
-    /*
     it('should handle GraphQL errors', async () => {
       mockOctokit.octokit.graphql.mockRejectedValueOnce(new Error('GraphQL Error'))
   
@@ -93,6 +92,7 @@ describe('Reactions Counter Action', () => {
   
       expect(core.setFailed).toHaveBeenCalledWith('GraphQL Error')
     })
+
     it('should skip items without content', async () => {
       mockOctokit.octokit.graphql
         .mockResolvedValueOnce(mockProjectQueryResponse)
