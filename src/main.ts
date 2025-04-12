@@ -1,11 +1,7 @@
 import * as core from '@actions/core'
 import { Octokit } from '@octokit/rest'
 
-interface GraphQLResponse<T> {
-  data: T
-}
-
-interface ProjectQueryResponse {
+export interface ProjectQueryResponse {
   repository: {
     projectV2: {
       id: string
@@ -20,7 +16,7 @@ interface ProjectQueryResponse {
   }
 }
 
-interface ProjectItemsQueryResponse {
+export interface ProjectItemsQueryResponse {
   node: {
     items: {
       nodes: Array<{
@@ -53,7 +49,11 @@ interface ProjectItemsQueryResponse {
   }
 }
 
-interface UpdateMutationResponse {
+export interface GraphQLResponse<T> {
+  data: T
+}
+
+export interface UpdateMutationResponse {
   updateProjectV2ItemFieldValue: {
     projectV2Item: {
       id: string
