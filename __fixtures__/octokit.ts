@@ -78,17 +78,31 @@ export const mockUpdateMutationResponse: GraphQLResponse<UpdateMutationResponse>
   }
 
 export class Octokit {
+  options: {
+    auth: string
+  }
+
+  constructor(options: { auth: string }) {
+    this.options = options
+  }
+
   graphql = jest.fn().mockImplementation(async (query: any) => {
+    let result
     if (query.includes('updateProjectItemFieldValue')) {
-      return mockUpdateMutationResponse
+      result = mockUpdateMutationResponse
+    } else if (query.includes('getProjectItems')) {
+      result = mockProjectItemsResponse
+    } else if (query.includes('getProject')) {
+      result = mockProjectQueryResponse
+      if (this.options.auth.includes('missing')) {
+        result.repository.projectV2.fields.nodes = []
+      }
+      if (this.options.auth.includes('error')) {
+        throw new Error('GraphQL Error')
+      }
+    } else {
+      throw new Error(`Unexpected query: ${query}`)
     }
-    if (query.includes('getProjectItems')) {
-      return mockProjectItemsResponse
-    }
-    if (query.includes('getProject')) {
-      return mockProjectQueryResponse
-    }
-    throw new Error(`Unexpected query: ${query}`)
+    return result
   })
-  auth = async () => ({ type: 'token' })
 }

@@ -21,10 +21,10 @@ describe('Reactions Counter Action', () => {
   it('should successfully update reaction counts', async () => {
     core.getInput.mockImplementation((name: string) => {
       switch (name) {
-        case 'github-token':
-          return 'test-token'
         case 'project-url':
           return 'https://github.com/test-org/test-repo/projects/1'
+        case 'github-token':
+          return 'success-token'
         case 'field-name':
           return 'Reactions'
         default:
@@ -40,10 +40,10 @@ describe('Reactions Counter Action', () => {
   it('should handle invalid project URL', async () => {
     core.getInput.mockImplementation((name: string) => {
       switch (name) {
-        case 'github-token':
-          return 'test-token'
         case 'project-url':
           return 'invalid-url'
+        case 'github-token':
+          return 'success-token'
         case 'field-name':
           return 'Reactions'
         default:
@@ -57,104 +57,44 @@ describe('Reactions Counter Action', () => {
       'Invalid project URL format. Expected: https://github.com/org/repo/projects/number'
     )
   })
-  /*
-    it('should handle missing field', async () => {
-      Octokit.octokit.graphql.mockImplementation(() =>
-        Promise.resolve({
-          repository: {
-            projectV2: {
-              id: 'project-1',
-              fields: {
-                nodes: [
-                  {
-                    id: 'field-1',
-                    name: 'Other Field',
-                    dataType: 'NUMBER'
-                  }
-                ]
-              }
-            }
-          }
-        })
-      )
-  
-      await run()
-  
-      expect(core.setFailed).toHaveBeenCalledWith(
-        'Field "Reactions" not found in project'
-      )
-    })
-  
-    it('should handle GraphQL errors', async () => {
-      mockOctokit.octokit.graphql.mockRejectedValueOnce(new Error('GraphQL Error'))
-  
-      await run()
-  
-      expect(core.setFailed).toHaveBeenCalledWith('GraphQL Error')
+
+  it('should handle missing field', async () => {
+    core.getInput.mockImplementation((name: string) => {
+      switch (name) {
+        case 'project-url':
+          return 'https://github.com/test-org/test-repo/projects/1'
+        case 'github-token':
+          return 'missing-token'
+        case 'field-name':
+          return 'Reactions'
+        default:
+          return ''
+      }
     })
 
-    it('should skip items without content', async () => {
-      mockOctokit.octokit.graphql
-        .mockResolvedValueOnce(mockProjectQueryResponse)
-        .mockResolvedValueOnce({
-          node: {
-            items: {
-              nodes: [
-                {
-                  id: 'item-1',
-                  content: null,
-                  fieldValues: {
-                    nodes: []
-                  }
-                }
-              ]
-            }
-          }
-        })
-  
-      await run()
-  
-      expect(core.setOutput).toHaveBeenCalledWith('status', 'success')
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      'Field "Reactions" not found in project'
+    )
+  })
+
+  it('should handle GraphQL errors', async () => {
+    core.getInput.mockImplementation((name: string) => {
+      switch (name) {
+        case 'project-url':
+          return 'https://github.com/test-org/test-repo/projects/1'
+        case 'github-token':
+          return 'error-token'
+        case 'field-name':
+          return 'Reactions'
+        default:
+          return ''
+      }
     })
-  
-    it('should not update unchanged values', async () => {
-      mockOctokit
-        .Octokit()
-        .mockResolvedValueOnce(mockProjectQueryResponse)
-        .mockResolvedValueOnce({
-          node: {
-            items: {
-              nodes: [
-                {
-                  id: 'item-1',
-                  content: {
-                    id: 'issue-1',
-                    number: 1,
-                    reactions: {
-                      nodes: [{ content: '👍' }, { content: '❤️' }]
-                    }
-                  },
-                  fieldValues: {
-                    nodes: [
-                      {
-                        field: {
-                          id: 'field-1',
-                          name: 'Reactions',
-                          dataType: 'NUMBER'
-                        },
-                        number: 2
-                      }
-                    ]
-                  }
-                }
-              ]
-            }
-          }
-        })
-  
-      await run()
-  
-      expect(core.setOutput).toHaveBeenCalledWith('status', 'success')
-      expect(mockOctokit.Octokit).toHaveBeenCalledTimes(2) // Only the first two queries, no update
-    })*/
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith('GraphQL Error')
+  })
 })
