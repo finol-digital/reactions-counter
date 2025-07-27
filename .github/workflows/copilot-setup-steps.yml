@@ -21,6 +21,7 @@ jobs:
     # checkov:skip=CKV2_GHA_1 reason: Permissions are restricted to contents: read as required for setup.
     permissions:
       # If you want to clone the repository as part of your setup steps, for example to install dependencies, you'll need the `contents: read` permission. If you don't clone the repository in your setup steps, Copilot will do this for you automatically after the steps complete.
+      # checkov:skip=CKV2_GHA_1 reason: Permissions are restricted to contents: read as required for setup.
       contents: read
 
     # You can define any steps you want, and they will run before the agent starts.
