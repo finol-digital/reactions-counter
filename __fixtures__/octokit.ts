@@ -86,7 +86,10 @@ export class Octokit {
     this.options = options
   }
 
-  graphql = jest.fn().mockImplementation(async (query: any) => {
+  graphql = jest.fn().mockImplementation(async (query: unknown) => {
+    if (typeof query !== 'string') {
+      throw new Error('Query must be a string')
+    }
     let result
     if (query.includes('updateProjectItemFieldValue')) {
       result = mockUpdateMutationResponse
