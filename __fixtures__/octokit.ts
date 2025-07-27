@@ -4,7 +4,7 @@ import {
   ProjectItemsQueryResponse,
   ProjectQueryResponse,
   UpdateMutationResponse
-} from '../src/main'
+} from '../src/types'
 
 export const mockProjectQueryResponse: ProjectQueryResponse = {
   repository: {

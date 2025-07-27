@@ -21,8 +21,9 @@ Please follow these guidelines when contributing:
 ## Repository Structure
 
 - `src/`: Core TypeScript source code
-  - `main.ts`: Main entry point and action orchestration/execution
   - `index.ts`: Action entrypoint that calls run()
+  - `main.ts`: Main entry point and action orchestration/execution
+  - `types.ts`: TypeScript type definitions
 - `__fixtures__/`: Fixtures for testing, including mock Octokit responses
 - `__tests__/`: Jest unit tests for all source files
 - `dist/`: Compiled and bundled JavaScript output (generated)
