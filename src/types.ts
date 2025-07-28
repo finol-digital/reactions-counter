@@ -1,5 +1,10 @@
 // TypeScript types for the reactions-counter action
 
+export interface PageInfo {
+  hasNextPage: boolean
+  endCursor: string | null
+}
+
 export interface ProjectQueryResponse {
   repository: {
     projectV2: {
@@ -10,6 +15,7 @@ export interface ProjectQueryResponse {
           name: string
           dataType: string
         }>
+        pageInfo: PageInfo
       }
     }
   }
@@ -27,6 +33,7 @@ export interface ProjectItemsQueryResponse {
             nodes: Array<{
               content: string
             }>
+            pageInfo: PageInfo
           }
         } | null
         fieldValues: {
@@ -42,8 +49,10 @@ export interface ProjectItemsQueryResponse {
             optionId?: string
             iterationId?: string
           }>
+          pageInfo: PageInfo
         }
       }>
+      pageInfo: PageInfo
     }
   }
 }
@@ -65,6 +74,7 @@ export interface UpdateMutationResponse {
           }
           number: number
         }>
+        pageInfo: PageInfo
       }
     }
   }

@@ -30815,30 +30815,18 @@ const Octokit = Octokit$1.plugin(requestLog, legacyRestEndpointMethods, paginate
 );
 
 /**
- * The main function for the action.
- * Counts reactions on GitHub Issues and updates a corresponding GitHub Project with the count.
- *
- * @returns Resolves when the action is complete.
+ * Fetches all project fields with pagination
  */
-async function run() {
-    try {
-        const projectUrl = coreExports.getInput('project-url');
-        const githubToken = coreExports.getInput('github-token');
-        const fieldName = coreExports.getInput('field-name');
-        // Initialize Octokit
-        const octokit = new Octokit({ auth: githubToken });
-        // Extract project number, organization, and repository from project URL
-        const projectUrlMatch = projectUrl.match(/github\.com\/([^/]+)\/([^/]+)\/projects\/(\d+)/);
-        if (!projectUrlMatch) {
-            throw new Error('Invalid project URL format. Expected: https://github.com/org/repo/projects/number');
-        }
-        const [, org, repo, projectNumber] = projectUrlMatch;
-        // Get project ID
-        const project = await octokit.graphql(`query getProject($org: String!, $repo: String!, $number: Int!) {
+async function fetchAllFields(octokit, org, repo, projectNumber) {
+    const allFields = [];
+    let cursor = null;
+    let hasNextPage = true;
+    while (hasNextPage) {
+        const project = await octokit.graphql(`query getProject($org: String!, $repo: String!, $number: Int!, $cursor: String) {
         repository(owner: $org, name: $repo) {
           projectV2(number: $number) {
             id
-            fields(first: 100) {
+            fields(first: 100, after: $cursor) {
               nodes {
                 ... on ProjectV2Field {
                   id
@@ -30856,31 +30844,40 @@ async function run() {
                   dataType
                 }
               }
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
             }
           }
         }
       }`, {
             org,
             repo,
-            number: parseInt(projectNumber, 10)
+            number: projectNumber,
+            cursor
         });
-        // Add debugging
-        coreExports.debug(`Project response: ${JSON.stringify(project, null, 2)}`);
         if (!project?.repository?.projectV2) {
             throw new Error('Failed to get project data. Response: ' + JSON.stringify(project));
         }
-        const projectId = project.repository.projectV2.id;
-        const fields = project.repository.projectV2.fields.nodes;
-        // Find the target field
-        const targetField = fields.find((field) => field.name === fieldName);
-        if (!targetField) {
-            throw new Error(`Field "${fieldName}" not found in project`);
-        }
-        // Get project items
-        const items = await octokit.graphql(`query getProjectItems($projectId: ID!) {
+        allFields.push(...project.repository.projectV2.fields.nodes);
+        hasNextPage = project.repository.projectV2.fields.pageInfo.hasNextPage;
+        cursor = project.repository.projectV2.fields.pageInfo.endCursor;
+    }
+    return allFields;
+}
+/**
+ * Fetches all project items with pagination
+ */
+async function fetchAllProjectItems(octokit, projectId) {
+    const allItems = [];
+    let cursor = null;
+    let hasNextPage = true;
+    while (hasNextPage) {
+        const items = await octokit.graphql(`query getProjectItems($projectId: ID!, $cursor: String) {
         node(id: $projectId) {
           ... on ProjectV2 {
-            items(first: 100) {
+            items(first: 100, after: $cursor) {
               nodes {
                 id
                 content {
@@ -30890,6 +30887,10 @@ async function run() {
                     reactions(first: 100) {
                       nodes {
                         content
+                      }
+                      pageInfo {
+                        hasNextPage
+                        endCursor
                       }
                     }
                   }
@@ -30947,21 +30948,113 @@ async function run() {
                       iterationId
                     }
                   }
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                  }
                 }
+              }
+              pageInfo {
+                hasNextPage
+                endCursor
               }
             }
           }
         }
       }`, {
-            projectId
+            projectId,
+            cursor
         });
-        const projectItems = items.node.items.nodes;
+        allItems.push(...items.node.items.nodes);
+        hasNextPage = items.node.items.pageInfo.hasNextPage;
+        cursor = items.node.items.pageInfo.endCursor;
+    }
+    return allItems;
+}
+/**
+ * Fetches all reactions for an issue with pagination
+ */
+async function fetchAllReactions(octokit, issueId, existingReactions, hasNextPage, endCursor) {
+    if (!hasNextPage) {
+        return existingReactions;
+    }
+    const allReactions = [...existingReactions];
+    let cursor = endCursor;
+    let hasMore = hasNextPage;
+    while (hasMore) {
+        const reactions = await octokit.graphql(`query getReactions($issueId: ID!, $cursor: String) {
+        node(id: $issueId) {
+          ... on Issue {
+            reactions(first: 100, after: $cursor) {
+              nodes {
+                content
+              }
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
+            }
+          }
+        }
+      }`, {
+            issueId,
+            cursor
+        });
+        allReactions.push(...reactions.node.reactions.nodes);
+        hasMore = reactions.node.reactions.pageInfo.hasNextPage;
+        cursor = reactions.node.reactions.pageInfo.endCursor;
+    }
+    return allReactions;
+}
+/**
+ * The main function for the action.
+ * Counts reactions on GitHub Issues and updates a corresponding GitHub Project with the count.
+ *
+ * @returns Resolves when the action is complete.
+ */
+async function run() {
+    try {
+        const projectUrl = coreExports.getInput('project-url');
+        const githubToken = coreExports.getInput('github-token');
+        const fieldName = coreExports.getInput('field-name');
+        // Initialize Octokit
+        const octokit = new Octokit({ auth: githubToken });
+        // Extract project number, organization, and repository from project URL
+        const projectUrlMatch = projectUrl.match(/github\.com\/([^/]+)\/([^/]+)\/projects\/(\d+)/);
+        if (!projectUrlMatch) {
+            throw new Error('Invalid project URL format. Expected: https://github.com/org/repo/projects/number');
+        }
+        const [, org, repo, projectNumber] = projectUrlMatch;
+        // Get project ID and fields using pagination
+        const fields = await fetchAllFields(octokit, org, repo, parseInt(projectNumber, 10));
+        // Find the target field
+        const targetField = fields.find((field) => field.name === fieldName);
+        if (!targetField) {
+            throw new Error(`Field "${fieldName}" not found in project`);
+        }
+        // Get project ID from a simple query
+        const projectIdQuery = await octokit.graphql(`query getProjectId($org: String!, $repo: String!, $number: Int!) {
+        repository(owner: $org, name: $repo) {
+          projectV2(number: $number) {
+            id
+          }
+        }
+      }`, {
+            org,
+            repo,
+            number: parseInt(projectNumber, 10)
+        });
+        const projectId = projectIdQuery.repository.projectV2.id;
+        // Get all project items with pagination
+        const projectItems = await fetchAllProjectItems(octokit, projectId);
         // Update each item with reaction count
         for (const item of projectItems) {
             if (!item.content)
                 continue;
             const issue = item.content;
-            const reactionCount = issue.reactions.nodes.length;
+            // Get all reactions for this issue (handle pagination if needed)
+            const allReactions = await fetchAllReactions(octokit, issue.id, issue.reactions.nodes, issue.reactions.pageInfo.hasNextPage, issue.reactions.pageInfo.endCursor);
+            const reactionCount = allReactions.length;
             // Find the current value of the target field
             const currentValue = item.fieldValues.nodes.find((value) => value.field?.name === fieldName);
             // Only update if the value has changed
@@ -30989,6 +31082,10 @@ async function run() {
                       }
                       number
                     }
+                  }
+                  pageInfo {
+                    hasNextPage
+                    endCursor
                   }
                 }
               }
