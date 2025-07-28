@@ -3,8 +3,14 @@ import {
   GraphQLResponse,
   ProjectItemsQueryResponse,
   ProjectQueryResponse,
-  UpdateMutationResponse
+  UpdateMutationResponse,
+  PageInfo
 } from '../src/types'
+
+const mockPageInfo: PageInfo = {
+  hasNextPage: false,
+  endCursor: null
+}
 
 export const mockProjectQueryResponse: ProjectQueryResponse = {
   repository: {
@@ -17,7 +23,8 @@ export const mockProjectQueryResponse: ProjectQueryResponse = {
             name: 'Reactions',
             dataType: 'NUMBER'
           }
-        ]
+        ],
+        pageInfo: mockPageInfo
       }
     }
   }
@@ -33,7 +40,8 @@ export const mockProjectItemsResponse: ProjectItemsQueryResponse = {
             id: 'issue-1',
             number: 1,
             reactions: {
-              nodes: [{ content: '👍' }, { content: '❤️' }]
+              nodes: [{ content: '👍' }, { content: '❤️' }],
+              pageInfo: mockPageInfo
             }
           },
           fieldValues: {
@@ -46,10 +54,12 @@ export const mockProjectItemsResponse: ProjectItemsQueryResponse = {
                 },
                 number: 1
               }
-            ]
+            ],
+            pageInfo: mockPageInfo
           }
         }
-      ]
+      ],
+      pageInfo: mockPageInfo
     }
   }
 }
@@ -70,7 +80,8 @@ export const mockUpdateMutationResponse: GraphQLResponse<UpdateMutationResponse>
                 },
                 number: 2
               }
-            ]
+            ],
+            pageInfo: mockPageInfo
           }
         }
       }
@@ -95,13 +106,23 @@ export class Octokit {
       result = mockUpdateMutationResponse
     } else if (query.includes('getProjectItems')) {
       result = mockProjectItemsResponse
-    } else if (query.includes('getProject')) {
+    } else if (query.includes('getProject') || query.includes('getProjectId')) {
       result = mockProjectQueryResponse
       if (this.options.auth.includes('missing')) {
         result.repository.projectV2.fields.nodes = []
       }
       if (this.options.auth.includes('error')) {
         throw new Error('GraphQL Error')
+      }
+    } else if (query.includes('getReactions')) {
+      // Mock additional reactions for pagination testing
+      result = {
+        node: {
+          reactions: {
+            nodes: [{ content: '🚀' }],
+            pageInfo: mockPageInfo
+          }
+        }
       }
     } else {
       throw new Error(`Unexpected query: ${query}`)

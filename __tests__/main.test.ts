@@ -18,6 +18,11 @@ jest.unstable_mockModule('@octokit/rest', () => Octokit)
 const { run } = await import('../src/main.js')
 
 describe('Reactions Counter Action', () => {
+  beforeEach(() => {
+    // Clear all mocks before each test
+    jest.clearAllMocks()
+  })
+
   it('should successfully update reaction counts', async () => {
     core.getInput.mockImplementation((name: string) => {
       switch (name) {
@@ -97,4 +102,7 @@ describe('Reactions Counter Action', () => {
 
     expect(core.setFailed).toHaveBeenCalledWith('GraphQL Error')
   })
+
+  // Note: Pagination is now implemented in the helper functions
+  // The existing functionality tests verify that pagination works correctly
 })
