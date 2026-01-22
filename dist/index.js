@@ -19,20 +19,19 @@ import require$$0$6 from 'node:diagnostics_channel';
 import require$$0$5 from 'node:util';
 import require$$4$1 from 'node:tls';
 import require$$0$7 from 'node:buffer';
-import require$$3$1 from 'node:zlib';
+import require$$0$8 from 'node:zlib';
 import require$$5$1 from 'node:perf_hooks';
 import require$$8 from 'node:util/types';
-import require$$2$3 from 'node:crypto';
-import require$$1$2 from 'node:sqlite';
-import require$$2$2 from 'node:worker_threads';
+import require$$1$2 from 'node:worker_threads';
 import require$$1$3 from 'node:async_hooks';
 import require$$1$4 from 'node:console';
-import require$$0$8 from 'node:fs/promises';
+import require$$0$9 from 'node:fs/promises';
 import require$$1$5 from 'node:path';
-import require$$2$4 from 'node:timers';
+import require$$2$2 from 'node:timers';
 import require$$1$6 from 'node:dns';
-import require$$0$9 from 'string_decoder';
-import require$$2$5 from 'child_process';
+import require$$31 from './lib/cache/sqlite-cache-store';
+import require$$0$a from 'string_decoder';
+import require$$2$3 from 'child_process';
 import require$$6$2 from 'timers';
 
 var core = {};
@@ -760,11 +759,6 @@ function requireSymbols () {
 	  kListeners: Symbol('listeners'),
 	  kHTTPContext: Symbol('http context'),
 	  kMaxConcurrentStreams: Symbol('max concurrent streams'),
-	  kHTTP2InitialWindowSize: Symbol('http2 initial window size'),
-	  kHTTP2ConnectionWindowSize: Symbol('http2 connection window size'),
-	  kEnableConnectProtocol: Symbol('http2session connect protocol'),
-	  kRemoteSettings: Symbol('http2session remote settings'),
-	  kHTTP2Stream: Symbol('http2session client stream'),
 	  kNoProxyAgent: Symbol('no proxy agent'),
 	  kHttpProxyAgent: Symbol('http proxy agent'),
 	  kHttpsProxyAgent: Symbol('https proxy agent')
@@ -2045,8 +2039,6 @@ function requireUtil$5 () {
 	    // to determine whether or not it has been disturbed. This is just
 	    // a workaround.
 	    return new BodyAsyncIterable(body)
-	  } else if (body && isFormDataLike(body)) {
-	    return body
 	  } else if (
 	    body &&
 	    typeof body !== 'string' &&
@@ -2604,14 +2596,14 @@ function requireUtil$5 () {
 	      pull (controller) {
 	        return iterator.next().then(({ done, value }) => {
 	          if (done) {
-	            return queueMicrotask(() => {
+	            queueMicrotask(() => {
 	              controller.close();
 	              controller.byobRequest?.respond(0);
-	            })
+	            });
 	          } else {
 	            const buf = Buffer.isBuffer(value) ? value : Buffer.from(value);
 	            if (buf.byteLength) {
-	              return controller.enqueue(new Uint8Array(buf))
+	              controller.enqueue(new Uint8Array(buf));
 	            } else {
 	              return this.pull(controller)
 	            }
@@ -2655,46 +2647,48 @@ function requireUtil$5 () {
 	  return () => signal.removeListener('abort', listener)
 	}
 
-	const validTokenChars = new Uint8Array([
-	  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0-15
-	  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 16-31
-	  0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, // 32-47 (!"#$%&'()*+,-./)
-	  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, // 48-63 (0-9:;<=>?)
-	  0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 64-79 (@A-O)
-	  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, // 80-95 (P-Z[\]^_)
-	  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 96-111 (`a-o)
-	  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, // 112-127 (p-z{|}~)
-	  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 128-143
-	  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 144-159
-	  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 160-175
-	  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 176-191
-	  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 192-207
-	  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 208-223
-	  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 224-239
-	  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0  // 240-255
-	]);
-
 	/**
 	 * @see https://tools.ietf.org/html/rfc7230#section-3.2.6
 	 * @param {number} c
 	 * @returns {boolean}
 	 */
 	function isTokenCharCode (c) {
-	  return (validTokenChars[c] === 1)
+	  switch (c) {
+	    case 0x22:
+	    case 0x28:
+	    case 0x29:
+	    case 0x2c:
+	    case 0x2f:
+	    case 0x3a:
+	    case 0x3b:
+	    case 0x3c:
+	    case 0x3d:
+	    case 0x3e:
+	    case 0x3f:
+	    case 0x40:
+	    case 0x5b:
+	    case 0x5c:
+	    case 0x5d:
+	    case 0x7b:
+	    case 0x7d:
+	      // DQUOTE and "(),/:;<=>?@[\]{}"
+	      return false
+	    default:
+	      // VCHAR %x21-7E
+	      return c >= 0x21 && c <= 0x7e
+	  }
 	}
-
-	const tokenRegExp = /^[\^_`a-zA-Z\-0-9!#$%&'*+.|~]+$/;
 
 	/**
 	 * @param {string} characters
 	 * @returns {boolean}
 	 */
 	function isValidHTTPToken (characters) {
-	  if (characters.length >= 12) return tokenRegExp.test(characters)
-	  if (characters.length === 0) return false
-
-	  for (let i = 0; i < characters.length; i++) {
-	    if (validTokenChars[characters.charCodeAt(i)] !== 1) {
+	  if (characters.length === 0) {
+	    return false
+	  }
+	  for (let i = 0; i < characters.length; ++i) {
+	    if (!isTokenCharCode(characters.charCodeAt(i))) {
 	      return false
 	    }
 	  }
@@ -3037,23 +3031,13 @@ function requireDiagnostics () {
 	  close: diagnosticsChannel.channel('undici:websocket:close'),
 	  socketError: diagnosticsChannel.channel('undici:websocket:socket_error'),
 	  ping: diagnosticsChannel.channel('undici:websocket:ping'),
-	  pong: diagnosticsChannel.channel('undici:websocket:pong'),
-	  // ProxyAgent
-	  proxyConnected: diagnosticsChannel.channel('undici:proxy:connected')
+	  pong: diagnosticsChannel.channel('undici:websocket:pong')
 	};
 
 	let isTrackingClientEvents = false;
 
 	function trackClientEvents (debugLog = undiciDebugLog) {
 	  if (isTrackingClientEvents) {
-	    return
-	  }
-
-	  // Check if any of the channels already have subscribers to prevent duplicate subscriptions
-	  // This can happen when both Node.js built-in undici and undici as a dependency are present
-	  if (channels.beforeConnect.hasSubscribers || channels.connected.hasSubscribers ||
-	      channels.connectError.hasSubscribers || channels.sendHeaders.hasSubscribers) {
-	    isTrackingClientEvents = true;
 	    return
 	  }
 
@@ -3119,14 +3103,6 @@ function requireDiagnostics () {
 	    return
 	  }
 
-	  // Check if any of the channels already have subscribers to prevent duplicate subscriptions
-	  // This can happen when both Node.js built-in undici and undici as a dependency are present
-	  if (channels.headers.hasSubscribers || channels.trailers.hasSubscribers ||
-	      channels.error.hasSubscribers) {
-	    isTrackingRequestEvents = true;
-	    return
-	  }
-
 	  isTrackingRequestEvents = true;
 
 	  diagnosticsChannel.subscribe('undici:request:headers',
@@ -3172,15 +3148,6 @@ function requireDiagnostics () {
 
 	function trackWebSocketEvents (debugLog = websocketDebuglog) {
 	  if (isTrackingWebSocketEvents) {
-	    return
-	  }
-
-	  // Check if any of the channels already have subscribers to prevent duplicate subscriptions
-	  // This can happen when both Node.js built-in undici and undici as a dependency are present
-	  if (channels.open.hasSubscribers || channels.close.hasSubscribers ||
-	      channels.socketError.hasSubscribers || channels.ping.hasSubscribers ||
-	      channels.pong.hasSubscribers) {
-	    isTrackingWebSocketEvents = true;
 	    return
 	  }
 
@@ -3237,11 +3204,11 @@ function requireDiagnostics () {
 	return diagnostics;
 }
 
-var request$2;
+var request$3;
 var hasRequiredRequest$1;
 
 function requireRequest$1 () {
-	if (hasRequiredRequest$1) return request$2;
+	if (hasRequiredRequest$1) return request$3;
 	hasRequiredRequest$1 = 1;
 
 	const {
@@ -3653,8 +3620,8 @@ function requireRequest$1 () {
 	  }
 	}
 
-	request$2 = Request;
-	return request$2;
+	request$3 = Request;
+	return request$3;
 }
 
 var wrapHandler;
@@ -3943,14 +3910,14 @@ function requireDispatcherBase () {
 	  /** @type {boolean} */
 	  [kDestroyed] = false;
 
-	  /** @type {Array<Function|null} */
+	  /** @type {Array|null} */
 	  [kOnDestroyed] = null;
 
 	  /** @type {boolean} */
 	  [kClosed] = false;
 
-	  /** @type {Array<Function>|null} */
-	  [kOnClosed] = null
+	  /** @type {Array} */
+	  [kOnClosed] = []
 
 	  /** @returns {boolean} */
 	  get destroyed () {
@@ -3976,8 +3943,7 @@ function requireDispatcherBase () {
 	    }
 
 	    if (this[kDestroyed]) {
-	      const err = new ClientDestroyedError();
-	      queueMicrotask(() => callback(err, null));
+	      queueMicrotask(() => callback(new ClientDestroyedError(), null));
 	      return
 	    }
 
@@ -3991,7 +3957,6 @@ function requireDispatcherBase () {
 	    }
 
 	    this[kClosed] = true;
-	    this[kOnClosed] ??= [];
 	    this[kOnClosed].push(callback);
 
 	    const onClosed = () => {
@@ -4005,7 +3970,9 @@ function requireDispatcherBase () {
 	    // Should not error.
 	    this[kClose]()
 	      .then(() => this.destroy())
-	      .then(() => queueMicrotask(onClosed));
+	      .then(() => {
+	        queueMicrotask(onClosed);
+	      });
 	  }
 
 	  destroy (err, callback) {
@@ -4017,7 +3984,7 @@ function requireDispatcherBase () {
 	    if (callback === undefined) {
 	      return new Promise((resolve, reject) => {
 	        this.destroy(err, (err, data) => {
-	          return err ? reject(err) : resolve(data)
+	          return err ? /* istanbul ignore next: should never error */ reject(err) : resolve(data)
 	        });
 	      })
 	    }
@@ -4040,7 +4007,7 @@ function requireDispatcherBase () {
 	    }
 
 	    this[kDestroyed] = true;
-	    this[kOnDestroyed] ??= [];
+	    this[kOnDestroyed] = this[kOnDestroyed] || [];
 	    this[kOnDestroyed].push(callback);
 
 	    const onDestroyed = () => {
@@ -4052,8 +4019,9 @@ function requireDispatcherBase () {
 	    };
 
 	    // Should not error.
-	    this[kDestroy](err)
-	      .then(() => queueMicrotask(onDestroyed));
+	    this[kDestroy](err).then(() => {
+	      queueMicrotask(onDestroyed);
+	    });
 	  }
 
 	  dispatch (opts, handler) {
@@ -4143,7 +4111,7 @@ function requireConnect () {
 	  }
 	};
 
-	function buildConnector ({ allowH2, useH2c, maxCachedSessions, socketPath, timeout, session: customSession, ...opts }) {
+	function buildConnector ({ allowH2, maxCachedSessions, socketPath, timeout, session: customSession, ...opts }) {
 	  if (maxCachedSessions != null && (!Number.isInteger(maxCachedSessions) || maxCachedSessions < 0)) {
 	    throw new InvalidArgumentError('maxCachedSessions must be a positive integer or zero')
 	  }
@@ -4196,9 +4164,6 @@ function requireConnect () {
 	        port,
 	        host: hostname
 	      });
-	      if (useH2c === true) {
-	        socket.alpnProtocol = 'h2';
-	      }
 	    }
 
 	    // Set TCP keep alive options on the socket here instead of in connect() for the case of assigning the socket
@@ -5044,284 +5009,6 @@ function requireGlobal$1 () {
 	return global$1;
 }
 
-var encoding;
-var hasRequiredEncoding;
-
-function requireEncoding () {
-	if (hasRequiredEncoding) return encoding;
-	hasRequiredEncoding = 1;
-
-	const textDecoder = new TextDecoder();
-
-	/**
-	 * @see https://encoding.spec.whatwg.org/#utf-8-decode
-	 * @param {Uint8Array} buffer
-	 */
-	function utf8DecodeBytes (buffer) {
-	  if (buffer.length === 0) {
-	    return ''
-	  }
-
-	  // 1. Let buffer be the result of peeking three bytes from
-	  //    ioQueue, converted to a byte sequence.
-
-	  // 2. If buffer is 0xEF 0xBB 0xBF, then read three
-	  //    bytes from ioQueue. (Do nothing with those bytes.)
-	  if (buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) {
-	    buffer = buffer.subarray(3);
-	  }
-
-	  // 3. Process a queue with an instance of UTF-8’s
-	  //    decoder, ioQueue, output, and "replacement".
-	  const output = textDecoder.decode(buffer);
-
-	  // 4. Return output.
-	  return output
-	}
-
-	encoding = {
-	  utf8DecodeBytes
-	};
-	return encoding;
-}
-
-var infra;
-var hasRequiredInfra;
-
-function requireInfra () {
-	if (hasRequiredInfra) return infra;
-	hasRequiredInfra = 1;
-
-	const assert = require$$0$2;
-	const { utf8DecodeBytes } = requireEncoding();
-
-	/**
-	 * @param {(char: string) => boolean} condition
-	 * @param {string} input
-	 * @param {{ position: number }} position
-	 * @returns {string}
-	 *
-	 * @see https://infra.spec.whatwg.org/#collect-a-sequence-of-code-points
-	 */
-	function collectASequenceOfCodePoints (condition, input, position) {
-	  // 1. Let result be the empty string.
-	  let result = '';
-
-	  // 2. While position doesn’t point past the end of input and the
-	  // code point at position within input meets the condition condition:
-	  while (position.position < input.length && condition(input[position.position])) {
-	    // 1. Append that code point to the end of result.
-	    result += input[position.position];
-
-	    // 2. Advance position by 1.
-	    position.position++;
-	  }
-
-	  // 3. Return result.
-	  return result
-	}
-
-	/**
-	 * A faster collectASequenceOfCodePoints that only works when comparing a single character.
-	 * @param {string} char
-	 * @param {string} input
-	 * @param {{ position: number }} position
-	 * @returns {string}
-	 *
-	 * @see https://infra.spec.whatwg.org/#collect-a-sequence-of-code-points
-	 */
-	function collectASequenceOfCodePointsFast (char, input, position) {
-	  const idx = input.indexOf(char, position.position);
-	  const start = position.position;
-
-	  if (idx === -1) {
-	    position.position = input.length;
-	    return input.slice(start)
-	  }
-
-	  position.position = idx;
-	  return input.slice(start, position.position)
-	}
-
-	const ASCII_WHITESPACE_REPLACE_REGEX = /[\u0009\u000A\u000C\u000D\u0020]/g; // eslint-disable-line no-control-regex
-
-	/**
-	 * @param {string} data
-	 * @returns {Uint8Array | 'failure'}
-	 *
-	 * @see https://infra.spec.whatwg.org/#forgiving-base64-decode
-	 */
-	function forgivingBase64 (data) {
-	  // 1. Remove all ASCII whitespace from data.
-	  data = data.replace(ASCII_WHITESPACE_REPLACE_REGEX, '');
-
-	  let dataLength = data.length;
-	  // 2. If data’s code point length divides by 4 leaving
-	  // no remainder, then:
-	  if (dataLength % 4 === 0) {
-	    // 1. If data ends with one or two U+003D (=) code points,
-	    // then remove them from data.
-	    if (data.charCodeAt(dataLength - 1) === 0x003D) {
-	      --dataLength;
-	      if (data.charCodeAt(dataLength - 1) === 0x003D) {
-	        --dataLength;
-	      }
-	    }
-	  }
-
-	  // 3. If data’s code point length divides by 4 leaving
-	  // a remainder of 1, then return failure.
-	  if (dataLength % 4 === 1) {
-	    return 'failure'
-	  }
-
-	  // 4. If data contains a code point that is not one of
-	  //  U+002B (+)
-	  //  U+002F (/)
-	  //  ASCII alphanumeric
-	  // then return failure.
-	  if (/[^+/0-9A-Za-z]/.test(data.length === dataLength ? data : data.substring(0, dataLength))) {
-	    return 'failure'
-	  }
-
-	  const buffer = Buffer.from(data, 'base64');
-	  return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
-	}
-
-	/**
-	 * @param {number} char
-	 * @returns {boolean}
-	 *
-	 * @see https://infra.spec.whatwg.org/#ascii-whitespace
-	 */
-	function isASCIIWhitespace (char) {
-	  return (
-	    char === 0x09 || // \t
-	    char === 0x0a || // \n
-	    char === 0x0c || // \f
-	    char === 0x0d || // \r
-	    char === 0x20    // space
-	  )
-	}
-
-	/**
-	 * @param {Uint8Array} input
-	 * @returns {string}
-	 *
-	 * @see https://infra.spec.whatwg.org/#isomorphic-decode
-	 */
-	function isomorphicDecode (input) {
-	  // 1. To isomorphic decode a byte sequence input, return a string whose code point
-	  //    length is equal to input’s length and whose code points have the same values
-	  //    as the values of input’s bytes, in the same order.
-	  const length = input.length;
-	  if ((2 << 15) - 1 > length) {
-	    return String.fromCharCode.apply(null, input)
-	  }
-	  let result = '';
-	  let i = 0;
-	  let addition = (2 << 15) - 1;
-	  while (i < length) {
-	    if (i + addition > length) {
-	      addition = length - i;
-	    }
-	    result += String.fromCharCode.apply(null, input.subarray(i, i += addition));
-	  }
-	  return result
-	}
-
-	const invalidIsomorphicEncodeValueRegex = /[^\x00-\xFF]/; // eslint-disable-line no-control-regex
-
-	/**
-	 * @param {string} input
-	 * @returns {string}
-	 *
-	 * @see https://infra.spec.whatwg.org/#isomorphic-encode
-	 */
-	function isomorphicEncode (input) {
-	  // 1. Assert: input contains no code points greater than U+00FF.
-	  assert(!invalidIsomorphicEncodeValueRegex.test(input));
-
-	  // 2. Return a byte sequence whose length is equal to input’s code
-	  //    point length and whose bytes have the same values as the
-	  //    values of input’s code points, in the same order
-	  return input
-	}
-
-	/**
-	 * @see https://infra.spec.whatwg.org/#parse-json-bytes-to-a-javascript-value
-	 * @param {Uint8Array} bytes
-	 */
-	function parseJSONFromBytes (bytes) {
-	  return JSON.parse(utf8DecodeBytes(bytes))
-	}
-
-	/**
-	 * @param {string} str
-	 * @param {boolean} [leading=true]
-	 * @param {boolean} [trailing=true]
-	 * @returns {string}
-	 *
-	 * @see https://infra.spec.whatwg.org/#strip-leading-and-trailing-ascii-whitespace
-	 */
-	function removeASCIIWhitespace (str, leading = true, trailing = true) {
-	  return removeChars(str, leading, trailing, isASCIIWhitespace)
-	}
-
-	/**
-	 * @param {string} str
-	 * @param {boolean} leading
-	 * @param {boolean} trailing
-	 * @param {(charCode: number) => boolean} predicate
-	 * @returns {string}
-	 */
-	function removeChars (str, leading, trailing, predicate) {
-	  let lead = 0;
-	  let trail = str.length - 1;
-
-	  if (leading) {
-	    while (lead < str.length && predicate(str.charCodeAt(lead))) lead++;
-	  }
-
-	  if (trailing) {
-	    while (trail > 0 && predicate(str.charCodeAt(trail))) trail--;
-	  }
-
-	  return lead === 0 && trail === str.length - 1 ? str : str.slice(lead, trail + 1)
-	}
-
-	// https://infra.spec.whatwg.org/#serialize-a-javascript-value-to-a-json-string
-	function serializeJavascriptValueToJSONString (value) {
-	  // 1. Let result be ? Call(%JSON.stringify%, undefined, « value »).
-	  const result = JSON.stringify(value);
-
-	  // 2. If result is undefined, then throw a TypeError.
-	  if (result === undefined) {
-	    throw new TypeError('Value is not JSON serializable')
-	  }
-
-	  // 3. Assert: result is a string.
-	  assert(typeof result === 'string');
-
-	  // 4. Return result.
-	  return result
-	}
-
-	infra = {
-	  collectASequenceOfCodePoints,
-	  collectASequenceOfCodePointsFast,
-	  forgivingBase64,
-	  isASCIIWhitespace,
-	  isomorphicDecode,
-	  isomorphicEncode,
-	  parseJSONFromBytes,
-	  removeASCIIWhitespace,
-	  removeChars,
-	  serializeJavascriptValueToJSONString
-	};
-	return infra;
-}
-
 var dataUrl;
 var hasRequiredDataUrl;
 
@@ -5330,20 +5017,19 @@ function requireDataUrl () {
 	hasRequiredDataUrl = 1;
 
 	const assert = require$$0$2;
-	const { forgivingBase64, collectASequenceOfCodePoints, collectASequenceOfCodePointsFast, isomorphicDecode, removeASCIIWhitespace, removeChars } = requireInfra();
 
 	const encoder = new TextEncoder();
 
 	/**
 	 * @see https://mimesniff.spec.whatwg.org/#http-token-code-point
 	 */
-	const HTTP_TOKEN_CODEPOINTS = /^[-!#$%&'*+.^_|~A-Za-z0-9]+$/u;
-	const HTTP_WHITESPACE_REGEX = /[\u000A\u000D\u0009\u0020]/u; // eslint-disable-line
-
+	const HTTP_TOKEN_CODEPOINTS = /^[!#$%&'*+\-.^_|~A-Za-z0-9]+$/;
+	const HTTP_WHITESPACE_REGEX = /[\u000A\u000D\u0009\u0020]/; // eslint-disable-line
+	const ASCII_WHITESPACE_REPLACE_REGEX = /[\u0009\u000A\u000C\u000D\u0020]/g; // eslint-disable-line
 	/**
 	 * @see https://mimesniff.spec.whatwg.org/#http-quoted-string-token-code-point
 	 */
-	const HTTP_QUOTED_STRING_TOKENS = /^[\u0009\u0020-\u007E\u0080-\u00FF]+$/u; // eslint-disable-line
+	const HTTP_QUOTED_STRING_TOKENS = /^[\u0009\u0020-\u007E\u0080-\u00FF]+$/; // eslint-disable-line
 
 	// https://fetch.spec.whatwg.org/#data-url-processor
 	/** @param {URL} dataURL */
@@ -5398,7 +5084,7 @@ function requireDataUrl () {
 	  // 11. If mimeType ends with U+003B (;), followed by
 	  // zero or more U+0020 SPACE, followed by an ASCII
 	  // case-insensitive match for "base64", then:
-	  if (/;(?:\u0020*)base64$/ui.test(mimeType)) {
+	  if (/;(\u0020){0,}base64$/i.test(mimeType)) {
 	    // 1. Let stringBody be the isomorphic decode of body.
 	    const stringBody = isomorphicDecode(body);
 
@@ -5416,7 +5102,7 @@ function requireDataUrl () {
 
 	    // 5. Remove trailing U+0020 SPACE code points from mimeType,
 	    // if any.
-	    mimeType = mimeType.replace(/(\u0020+)$/u, '');
+	    mimeType = mimeType.replace(/(\u0020)+$/, '');
 
 	    // 6. Remove the last U+003B (;) code point from mimeType.
 	    mimeType = mimeType.slice(0, -1);
@@ -5466,6 +5152,49 @@ function requireDataUrl () {
 	  return serialized
 	}
 
+	// https://infra.spec.whatwg.org/#collect-a-sequence-of-code-points
+	/**
+	 * @param {(char: string) => boolean} condition
+	 * @param {string} input
+	 * @param {{ position: number }} position
+	 */
+	function collectASequenceOfCodePoints (condition, input, position) {
+	  // 1. Let result be the empty string.
+	  let result = '';
+
+	  // 2. While position doesn’t point past the end of input and the
+	  // code point at position within input meets the condition condition:
+	  while (position.position < input.length && condition(input[position.position])) {
+	    // 1. Append that code point to the end of result.
+	    result += input[position.position];
+
+	    // 2. Advance position by 1.
+	    position.position++;
+	  }
+
+	  // 3. Return result.
+	  return result
+	}
+
+	/**
+	 * A faster collectASequenceOfCodePoints that only works when comparing a single character.
+	 * @param {string} char
+	 * @param {string} input
+	 * @param {{ position: number }} position
+	 */
+	function collectASequenceOfCodePointsFast (char, input, position) {
+	  const idx = input.indexOf(char, position.position);
+	  const start = position.position;
+
+	  if (idx === -1) {
+	    position.position = input.length;
+	    return input.slice(start)
+	  }
+
+	  position.position = idx;
+	  return input.slice(start, position.position)
+	}
+
 	// https://url.spec.whatwg.org/#string-percent-decode
 	/** @param {string} input */
 	function stringPercentDecode (input) {
@@ -5506,9 +5235,8 @@ function requireDataUrl () {
 	  /** @type {Uint8Array} */
 	  const output = new Uint8Array(length);
 	  let j = 0;
-	  let i = 0;
 	  // 2. For each byte byte in input:
-	  while (i < length) {
+	  for (let i = 0; i < length; ++i) {
 	    const byte = input[i];
 
 	    // 1. If byte is not 0x25 (%), then append byte to output.
@@ -5536,7 +5264,6 @@ function requireDataUrl () {
 	      // 3. Skip the next two bytes in input.
 	      i += 2;
 	    }
-	    ++i;
 	  }
 
 	  // 3. Return output.
@@ -5716,6 +5443,45 @@ function requireDataUrl () {
 	  return mimeType
 	}
 
+	// https://infra.spec.whatwg.org/#forgiving-base64-decode
+	/** @param {string} data */
+	function forgivingBase64 (data) {
+	  // 1. Remove all ASCII whitespace from data.
+	  data = data.replace(ASCII_WHITESPACE_REPLACE_REGEX, '');
+
+	  let dataLength = data.length;
+	  // 2. If data’s code point length divides by 4 leaving
+	  // no remainder, then:
+	  if (dataLength % 4 === 0) {
+	    // 1. If data ends with one or two U+003D (=) code points,
+	    // then remove them from data.
+	    if (data.charCodeAt(dataLength - 1) === 0x003D) {
+	      --dataLength;
+	      if (data.charCodeAt(dataLength - 1) === 0x003D) {
+	        --dataLength;
+	      }
+	    }
+	  }
+
+	  // 3. If data’s code point length divides by 4 leaving
+	  // a remainder of 1, then return failure.
+	  if (dataLength % 4 === 1) {
+	    return 'failure'
+	  }
+
+	  // 4. If data contains a code point that is not one of
+	  //  U+002B (+)
+	  //  U+002F (/)
+	  //  ASCII alphanumeric
+	  // then return failure.
+	  if (/[^+/0-9A-Za-z]/.test(data.length === dataLength ? data : data.substring(0, dataLength))) {
+	    return 'failure'
+	  }
+
+	  const buffer = Buffer.from(data, 'base64');
+	  return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+	}
+
 	// https://fetch.spec.whatwg.org/#collect-an-http-quoted-string
 	// tests: https://fetch.spec.whatwg.org/#example-http-quoted-string
 	/**
@@ -5822,7 +5588,7 @@ function requireDataUrl () {
 	    if (!HTTP_TOKEN_CODEPOINTS.test(value)) {
 	      // 1. Precede each occurrence of U+0022 (") or
 	      //    U+005C (\) in value with U+005C (\).
-	      value = value.replace(/[\\"]/ug, '\\$&');
+	      value = value.replace(/(\\|")/g, '\\$1');
 
 	      // 2. Prepend U+0022 (") to value.
 	      value = '"' + value;
@@ -5856,6 +5622,71 @@ function requireDataUrl () {
 	 */
 	function removeHTTPWhitespace (str, leading = true, trailing = true) {
 	  return removeChars(str, leading, trailing, isHTTPWhiteSpace)
+	}
+
+	/**
+	 * @see https://infra.spec.whatwg.org/#ascii-whitespace
+	 * @param {number} char
+	 */
+	function isASCIIWhitespace (char) {
+	  // "\r\n\t\f "
+	  return char === 0x00d || char === 0x00a || char === 0x009 || char === 0x00c || char === 0x020
+	}
+
+	/**
+	 * @see https://infra.spec.whatwg.org/#strip-leading-and-trailing-ascii-whitespace
+	 * @param {string} str
+	 * @param {boolean} [leading=true]
+	 * @param {boolean} [trailing=true]
+	 */
+	function removeASCIIWhitespace (str, leading = true, trailing = true) {
+	  return removeChars(str, leading, trailing, isASCIIWhitespace)
+	}
+
+	/**
+	 * @param {string} str
+	 * @param {boolean} leading
+	 * @param {boolean} trailing
+	 * @param {(charCode: number) => boolean} predicate
+	 * @returns
+	 */
+	function removeChars (str, leading, trailing, predicate) {
+	  let lead = 0;
+	  let trail = str.length - 1;
+
+	  if (leading) {
+	    while (lead < str.length && predicate(str.charCodeAt(lead))) lead++;
+	  }
+
+	  if (trailing) {
+	    while (trail > 0 && predicate(str.charCodeAt(trail))) trail--;
+	  }
+
+	  return lead === 0 && trail === str.length - 1 ? str : str.slice(lead, trail + 1)
+	}
+
+	/**
+	 * @see https://infra.spec.whatwg.org/#isomorphic-decode
+	 * @param {Uint8Array} input
+	 * @returns {string}
+	 */
+	function isomorphicDecode (input) {
+	  // 1. To isomorphic decode a byte sequence input, return a string whose code point
+	  //    length is equal to input’s length and whose code points have the same values
+	  //    as the values of input’s bytes, in the same order.
+	  const length = input.length;
+	  if ((2 << 15) - 1 > length) {
+	    return String.fromCharCode.apply(null, input)
+	  }
+	  let result = ''; let i = 0;
+	  let addition = (2 << 15) - 1;
+	  while (i < length) {
+	    if (i + addition > length) {
+	      addition = length - i;
+	    }
+	    result += String.fromCharCode.apply(null, input.subarray(i, i += addition));
+	  }
+	  return result
 	}
 
 	/**
@@ -5915,148 +5746,19 @@ function requireDataUrl () {
 	dataUrl = {
 	  dataURLProcessor,
 	  URLSerializer,
+	  collectASequenceOfCodePoints,
+	  collectASequenceOfCodePointsFast,
 	  stringPercentDecode,
 	  parseMIMEType,
 	  collectAnHTTPQuotedString,
 	  serializeAMimeType,
+	  removeChars,
 	  removeHTTPWhitespace,
 	  minimizeSupportedMimeType,
-	  HTTP_TOKEN_CODEPOINTS
+	  HTTP_TOKEN_CODEPOINTS,
+	  isomorphicDecode
 	};
 	return dataUrl;
-}
-
-var runtimeFeatures = {};
-
-var hasRequiredRuntimeFeatures;
-
-function requireRuntimeFeatures () {
-	if (hasRequiredRuntimeFeatures) return runtimeFeatures;
-	hasRequiredRuntimeFeatures = 1;
-
-	/** @typedef {`node:${string}`} NodeModuleName */
-
-	/** @type {Record<NodeModuleName, () => any>} */
-	const lazyLoaders = {
-	  __proto__: null,
-	  'node:crypto': () => require$$2$3,
-	  'node:sqlite': () => require$$1$2,
-	  'node:worker_threads': () => require$$2$2,
-	  'node:zlib': () => require$$3$1
-	};
-
-	/**
-	 * @param {NodeModuleName} moduleName
-	 * @returns {boolean}
-	 */
-	function detectRuntimeFeatureByNodeModule (moduleName) {
-	  try {
-	    lazyLoaders[moduleName]();
-	    return true
-	  } catch (err) {
-	    if (err.code !== 'ERR_UNKNOWN_BUILTIN_MODULE' && err.code !== 'ERR_NO_CRYPTO') {
-	      throw err
-	    }
-	    return false
-	  }
-	}
-
-	/**
-	 * @param {NodeModuleName} moduleName
-	 * @param {string} property
-	 * @returns {boolean}
-	 */
-	function detectRuntimeFeatureByExportedProperty (moduleName, property) {
-	  const module = lazyLoaders[moduleName]();
-	  return typeof module[property] !== 'undefined'
-	}
-
-	const runtimeFeaturesByExportedProperty = /** @type {const} */ (['markAsUncloneable', 'zstd']);
-
-	/** @type {Record<RuntimeFeatureByExportedProperty, [NodeModuleName, string]>} */
-	const exportedPropertyLookup = {
-	  markAsUncloneable: ['node:worker_threads', 'markAsUncloneable'],
-	  zstd: ['node:zlib', 'createZstdDecompress']
-	};
-
-	/** @typedef {typeof runtimeFeaturesByExportedProperty[number]} RuntimeFeatureByExportedProperty */
-
-	const runtimeFeaturesAsNodeModule = /** @type {const} */ (['crypto', 'sqlite']);
-	/** @typedef {typeof runtimeFeaturesAsNodeModule[number]} RuntimeFeatureByNodeModule */
-
-	const features = /** @type {const} */ ([
-	  ...runtimeFeaturesAsNodeModule,
-	  ...runtimeFeaturesByExportedProperty
-	]);
-
-	/** @typedef {typeof features[number]} Feature */
-
-	/**
-	 * @param {Feature} feature
-	 * @returns {boolean}
-	 */
-	function detectRuntimeFeature (feature) {
-	  if (runtimeFeaturesAsNodeModule.includes(/** @type {RuntimeFeatureByNodeModule} */ (feature))) {
-	    return detectRuntimeFeatureByNodeModule(`node:${feature}`)
-	  } else if (runtimeFeaturesByExportedProperty.includes(/** @type {RuntimeFeatureByExportedProperty} */ (feature))) {
-	    const [moduleName, property] = exportedPropertyLookup[feature];
-	    return detectRuntimeFeatureByExportedProperty(moduleName, property)
-	  }
-	  throw new TypeError(`unknown feature: ${feature}`)
-	}
-
-	/**
-	 * @class
-	 * @name RuntimeFeatures
-	 */
-	class RuntimeFeatures {
-	  /** @type {Map<Feature, boolean>} */
-	  #map = new Map()
-
-	  /**
-	   * Clears all cached feature detections.
-	   */
-	  clear () {
-	    this.#map.clear();
-	  }
-
-	  /**
-	   * @param {Feature} feature
-	   * @returns {boolean}
-	   */
-	  has (feature) {
-	    return (
-	      this.#map.get(feature) ?? this.#detectRuntimeFeature(feature)
-	    )
-	  }
-
-	  /**
-	   * @param {Feature} feature
-	   * @param {boolean} value
-	   */
-	  set (feature, value) {
-	    if (features.includes(feature) === false) {
-	      throw new TypeError(`unknown feature: ${feature}`)
-	    }
-	    this.#map.set(feature, value);
-	  }
-
-	  /**
-	   * @param {Feature} feature
-	   * @returns {boolean}
-	   */
-	  #detectRuntimeFeature (feature) {
-	    const result = detectRuntimeFeature(feature);
-	    this.#map.set(feature, result);
-	    return result
-	  }
-	}
-
-	const instance = new RuntimeFeatures();
-
-	runtimeFeatures.runtimeFeatures = instance;
-	runtimeFeatures.default = instance;
-	return runtimeFeatures;
 }
 
 var webidl_1;
@@ -6067,7 +5769,7 @@ function requireWebidl () {
 	hasRequiredWebidl = 1;
 
 	const { types, inspect } = require$$0$5;
-	const { runtimeFeatures } = requireRuntimeFeatures();
+	const { markAsUncloneable } = require$$1$2;
 
 	const UNDEFINED = 1;
 	const BOOLEAN = 2;
@@ -6223,9 +5925,7 @@ function requireWebidl () {
 	  }
 	};
 
-	webidl.util.markAsUncloneable = runtimeFeatures.has('markAsUncloneable')
-	  ? require$$2$2.markAsUncloneable
-	  : () => {};
+	webidl.util.markAsUncloneable = markAsUncloneable || (() => {});
 
 	// https://webidl.spec.whatwg.org/#abstract-opdef-converttoint
 	webidl.util.ConvertToInt = function (V, bitLength, signedness, flags) {
@@ -7026,16 +6726,15 @@ function requireUtil$4 () {
 	hasRequiredUtil$4 = 1;
 
 	const { Transform } = require$$0$3;
-	const zlib = require$$3$1;
+	const zlib = require$$0$8;
 	const { redirectStatusSet, referrerPolicyTokens, badPortsSet } = requireConstants$2();
 	const { getGlobalOrigin } = requireGlobal$1();
-	const { collectAnHTTPQuotedString, parseMIMEType } = requireDataUrl();
+	const { collectASequenceOfCodePoints, collectAnHTTPQuotedString, removeChars, parseMIMEType } = requireDataUrl();
 	const { performance } = require$$5$1;
 	const { ReadableStreamFrom, isValidHTTPToken, normalizedMethodRecordsBase } = requireUtil$5();
 	const assert = require$$0$2;
 	const { isUint8Array } = require$$8;
 	const { webidl } = requireWebidl();
-	const { isomorphicEncode, collectASequenceOfCodePoints, removeChars } = requireInfra();
 
 	function responseURL (response) {
 	  // https://fetch.spec.whatwg.org/#responses
@@ -7746,6 +7445,23 @@ function requireUtil$4 () {
 	  return normalizedMethodRecordsBase[method.toLowerCase()] ?? method
 	}
 
+	// https://infra.spec.whatwg.org/#serialize-a-javascript-value-to-a-json-string
+	function serializeJavascriptValueToJSONString (value) {
+	  // 1. Let result be ? Call(%JSON.stringify%, undefined, « value »).
+	  const result = JSON.stringify(value);
+
+	  // 2. If result is undefined, then throw a TypeError.
+	  if (result === undefined) {
+	    throw new TypeError('Value is not JSON serializable')
+	  }
+
+	  // 3. Assert: result is a string.
+	  assert(typeof result === 'string');
+
+	  // 4. Return result.
+	  return result
+	}
+
 	// https://tc39.es/ecma262/#sec-%25iteratorprototype%25-object
 	const esIteratorPrototype = Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]()));
 
@@ -7999,6 +7715,22 @@ function requireUtil$4 () {
 	      throw err
 	    }
 	  }
+	}
+
+	const invalidIsomorphicEncodeValueRegex = /[^\x00-\xFF]/; // eslint-disable-line
+
+	/**
+	 * @see https://infra.spec.whatwg.org/#isomorphic-encode
+	 * @param {string} input
+	 */
+	function isomorphicEncode (input) {
+	  // 1. Assert: input contains no code points greater than U+00FF.
+	  assert(!invalidIsomorphicEncodeValueRegex.test(input));
+
+	  // 2. Return a byte sequence whose length is equal to input’s code
+	  //    point length and whose bytes have the same values as the
+	  //    values of input’s code points, in the same order
+	  return input
 	}
 
 	/**
@@ -8453,26 +8185,32 @@ function requireUtil$4 () {
 	  return gettingDecodingSplitting(value)
 	}
 
-	function hasAuthenticationEntry (request) {
-	  return false
-	}
+	const textDecoder = new TextDecoder();
 
 	/**
-	 * @see https://url.spec.whatwg.org/#include-credentials
-	 * @param {URL} url
+	 * @see https://encoding.spec.whatwg.org/#utf-8-decode
+	 * @param {Buffer} buffer
 	 */
-	function includesCredentials (url) {
-	  // A URL includes credentials if its username or password is not the empty string.
-	  return !!(url.username && url.password)
-	}
+	function utf8DecodeBytes (buffer) {
+	  if (buffer.length === 0) {
+	    return ''
+	  }
 
-	/**
-	 * @see https://html.spec.whatwg.org/multipage/document-sequences.html#traversable-navigable
-	 * @param {object|string} navigable
-	 */
-	function isTraversableNavigable (navigable) {
-	  // TODO
-	  return true
+	  // 1. Let buffer be the result of peeking three bytes from
+	  //    ioQueue, converted to a byte sequence.
+
+	  // 2. If buffer is 0xEF 0xBB 0xBF, then read three
+	  //    bytes from ioQueue. (Do nothing with those bytes.)
+	  if (buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) {
+	    buffer = buffer.subarray(3);
+	  }
+
+	  // 3. Process a queue with an instance of UTF-8’s
+	  //    decoder, ioQueue, output, and "replacement".
+	  const output = textDecoder.decode(buffer);
+
+	  // 4. Return output.
+	  return output
 	}
 
 	class EnvironmentSettingsObjectBase {
@@ -8520,6 +8258,7 @@ function requireUtil$4 () {
 	  isValidReasonPhrase,
 	  sameOrigin,
 	  normalizeMethod,
+	  serializeJavascriptValueToJSONString,
 	  iteratorMixin,
 	  createIterator,
 	  isValidHeaderName,
@@ -8527,6 +8266,7 @@ function requireUtil$4 () {
 	  isErrorLike,
 	  fullyReadBody,
 	  readableStreamClose,
+	  isomorphicEncode,
 	  urlIsLocal,
 	  urlHasHttpsScheme,
 	  urlIsHttpHttpsScheme,
@@ -8536,11 +8276,9 @@ function requireUtil$4 () {
 	  createInflate,
 	  extractMimeType,
 	  getDecodeSplit,
+	  utf8DecodeBytes,
 	  environmentSettingsObject,
-	  isOriginIPPotentiallyTrustworthy,
-	  hasAuthenticationEntry,
-	  includesCredentials,
-	  isTraversableNavigable
+	  isOriginIPPotentiallyTrustworthy
 	};
 	return util$4;
 }
@@ -8818,15 +8556,16 @@ function requireFormdataParser () {
 	hasRequiredFormdataParser = 1;
 
 	const { bufferToLowerCasedHeaderName } = requireUtil$5();
-	const { HTTP_TOKEN_CODEPOINTS } = requireDataUrl();
+	const { utf8DecodeBytes } = requireUtil$4();
+	const { HTTP_TOKEN_CODEPOINTS, isomorphicDecode } = requireDataUrl();
 	const { makeEntry } = requireFormdata();
 	const { webidl } = requireWebidl();
 	const assert = require$$0$2;
-	const { isomorphicDecode } = requireInfra();
-	const { utf8DecodeBytes } = requireEncoding();
 
+	const formDataNameBuffer = Buffer.from('form-data; name="');
+	const filenameBuffer = Buffer.from('filename');
 	const dd = Buffer.from('--');
-	const decoder = new TextDecoder();
+	const ddcrlf = Buffer.from('--\r\n');
 
 	/**
 	 * @param {string} chars
@@ -8900,16 +8639,20 @@ function requireFormdataParser () {
 	  //    the first byte.
 	  const position = { position: 0 };
 
-	  // Note: Per RFC 2046 Section 5.1.1, we must ignore anything before the
-	  // first boundary delimiter line (preamble). Search for the first boundary.
-	  const firstBoundaryIndex = input.indexOf(boundary);
-
-	  if (firstBoundaryIndex === -1) {
-	    throw parsingError('no boundary found in multipart body')
+	  // Note: undici addition, allows leading and trailing CRLFs.
+	  while (input[position.position] === 0x0d && input[position.position + 1] === 0x0a) {
+	    position.position += 2;
 	  }
 
-	  // Start parsing from the first boundary, ignoring any preamble
-	  position.position = firstBoundaryIndex;
+	  let trailing = input.length;
+
+	  while (input[trailing - 1] === 0x0a && input[trailing - 2] === 0x0d) {
+	    trailing -= 2;
+	  }
+
+	  if (trailing !== input.length) {
+	    input = input.subarray(0, trailing);
+	  }
 
 	  // 5. While true:
 	  while (true) {
@@ -8925,11 +8668,11 @@ function requireFormdataParser () {
 
 	    // 5.2. If position points to the sequence of bytes 0x2D 0x2D 0x0D 0x0A
 	    //      (`--` followed by CR LF) followed by the end of input, return entry list.
-	    // Note: Per RFC 2046 Section 5.1.1, we must ignore anything after the
-	    // final boundary delimiter (epilogue). Check for -- or --CRLF and return
-	    // regardless of what follows.
-	    if (bufferStartsWith(input, dd, position)) {
-	      // Found closing boundary delimiter (--), ignore any epilogue
+	    // Note: a body does NOT need to end with CRLF. It can end with --.
+	    if (
+	      (position.position === input.length - 2 && bufferStartsWith(input, dd, position)) ||
+	      (position.position === input.length - 4 && bufferStartsWith(input, ddcrlf, position))
+	    ) {
 	      return entryList
 	    }
 
@@ -9018,113 +8761,6 @@ function requireFormdataParser () {
 	}
 
 	/**
-	 * Parses content-disposition attributes (e.g., name="value" or filename*=utf-8''encoded)
-	 * @param {Buffer} input
-	 * @param {{ position: number }} position
-	 * @returns {{ name: string, value: string }}
-	 */
-	function parseContentDispositionAttribute (input, position) {
-	  // Skip leading semicolon and whitespace
-	  if (input[position.position] === 0x3b /* ; */) {
-	    position.position++;
-	  }
-
-	  // Skip whitespace
-	  collectASequenceOfBytes(
-	    (char) => char === 0x20 || char === 0x09,
-	    input,
-	    position
-	  );
-
-	  // Collect attribute name (token characters)
-	  const attributeName = collectASequenceOfBytes(
-	    (char) => isToken(char) && char !== 0x3d && char !== 0x2a, // not = or *
-	    input,
-	    position
-	  );
-
-	  if (attributeName.length === 0) {
-	    return null
-	  }
-
-	  const attrNameStr = attributeName.toString('ascii').toLowerCase();
-
-	  // Check for extended notation (attribute*)
-	  const isExtended = input[position.position] === 0x2a; /* * */
-	  if (isExtended) {
-	    position.position++; // skip *
-	  }
-
-	  // Expect = sign
-	  if (input[position.position] !== 0x3d /* = */) {
-	    return null
-	  }
-	  position.position++; // skip =
-
-	  // Skip whitespace
-	  collectASequenceOfBytes(
-	    (char) => char === 0x20 || char === 0x09,
-	    input,
-	    position
-	  );
-
-	  let value;
-
-	  if (isExtended) {
-	    // Extended attribute format: charset'language'encoded-value
-	    const headerValue = collectASequenceOfBytes(
-	      (char) => char !== 0x20 && char !== 0x0d && char !== 0x0a && char !== 0x3b, // not space, CRLF, or ;
-	      input,
-	      position
-	    );
-
-	    // Check for utf-8'' prefix (case insensitive)
-	    if (
-	      (headerValue[0] !== 0x75 && headerValue[0] !== 0x55) || // u or U
-	      (headerValue[1] !== 0x74 && headerValue[1] !== 0x54) || // t or T
-	      (headerValue[2] !== 0x66 && headerValue[2] !== 0x46) || // f or F
-	      headerValue[3] !== 0x2d || // -
-	      headerValue[4] !== 0x38 // 8
-	    ) {
-	      throw parsingError('unknown encoding, expected utf-8\'\'')
-	    }
-
-	    // Skip utf-8'' and decode the rest
-	    value = decodeURIComponent(decoder.decode(headerValue.subarray(7)));
-	  } else if (input[position.position] === 0x22 /* " */) {
-	    // Quoted string
-	    position.position++; // skip opening quote
-
-	    const quotedValue = collectASequenceOfBytes(
-	      (char) => char !== 0x0a && char !== 0x0d && char !== 0x22, // not LF, CR, or "
-	      input,
-	      position
-	    );
-
-	    if (input[position.position] !== 0x22) {
-	      throw parsingError('Closing quote not found')
-	    }
-	    position.position++; // skip closing quote
-
-	    value = decoder.decode(quotedValue)
-	      .replace(/%0A/ig, '\n')
-	      .replace(/%0D/ig, '\r')
-	      .replace(/%22/g, '"');
-	  } else {
-	    // Token value (no quotes)
-	    const tokenValue = collectASequenceOfBytes(
-	      (char) => isToken(char) && char !== 0x3b, // not ;
-	      input,
-	      position
-	    );
-
-	    value = decoder.decode(tokenValue);
-	  }
-
-	  return { name: attrNameStr, value }
-	}
-
-	/**
 	 * @see https://andreubotella.github.io/multipart-form-data/#parse-multipart-form-data-headers
 	 * @param {Buffer} input
 	 * @param {{ position: number }} position
@@ -9184,40 +8820,80 @@ function requireFormdataParser () {
 	    // 2.8. Byte-lowercase header name and switch on the result:
 	    switch (bufferToLowerCasedHeaderName(headerName)) {
 	      case 'content-disposition': {
+	        // 1. Set name and filename to null.
 	        name = filename = null;
 
-	        // Collect the disposition type (should be "form-data")
-	        const dispositionType = collectASequenceOfBytes(
-	          (char) => isToken(char),
-	          input,
-	          position
-	        );
-
-	        if (dispositionType.toString('ascii').toLowerCase() !== 'form-data') {
-	          throw parsingError('expected form-data for content-disposition header')
+	        // 2. If position does not point to a sequence of bytes starting with
+	        //    `form-data; name="`, return failure.
+	        if (!bufferStartsWith(input, formDataNameBuffer, position)) {
+	          throw parsingError('expected form-data; name=" for content-disposition header')
 	        }
 
-	        // Parse attributes recursively until CRLF
-	        while (
-	          position.position < input.length &&
-	          input[position.position] !== 0x0d &&
-	          input[position.position + 1] !== 0x0a
-	        ) {
-	          const attribute = parseContentDispositionAttribute(input, position);
+	        // 3. Advance position so it points at the byte after the next 0x22 (")
+	        //    byte (the one in the sequence of bytes matched above).
+	        position.position += 17;
 
-	          if (!attribute) {
-	            break
+	        // 4. Set name to the result of parsing a multipart/form-data name given
+	        //    input and position, if the result is not failure. Otherwise, return
+	        //    failure.
+	        name = parseMultipartFormDataName(input, position);
+
+	        // 5. If position points to a sequence of bytes starting with `; filename="`:
+	        if (input[position.position] === 0x3b /* ; */ && input[position.position + 1] === 0x20 /* ' ' */) {
+	          const at = { position: position.position + 2 };
+
+	          if (bufferStartsWith(input, filenameBuffer, at)) {
+	            if (input[at.position + 8] === 0x2a /* '*' */) {
+	              at.position += 10; // skip past filename*=
+
+	              // Remove leading http tab and spaces. See RFC for examples.
+	              // https://datatracker.ietf.org/doc/html/rfc6266#section-5
+	              collectASequenceOfBytes(
+	                (char) => char === 0x20 || char === 0x09,
+	                input,
+	                at
+	              );
+
+	              const headerValue = collectASequenceOfBytes(
+	                (char) => char !== 0x20 && char !== 0x0d && char !== 0x0a, // ' ' or CRLF
+	                input,
+	                at
+	              );
+
+	              if (
+	                (headerValue[0] !== 0x75 && headerValue[0] !== 0x55) || // u or U
+	                (headerValue[1] !== 0x74 && headerValue[1] !== 0x54) || // t or T
+	                (headerValue[2] !== 0x66 && headerValue[2] !== 0x46) || // f or F
+	                headerValue[3] !== 0x2d || // -
+	                headerValue[4] !== 0x38 // 8
+	              ) {
+	                throw parsingError('unknown encoding, expected utf-8\'\'')
+	              }
+
+	              // skip utf-8''
+	              filename = decodeURIComponent(new TextDecoder().decode(headerValue.subarray(7)));
+
+	              position.position = at.position;
+	            } else {
+	              // 1. Advance position so it points at the byte after the next 0x22 (") byte
+	              //    (the one in the sequence of bytes matched above).
+	              position.position += 11;
+
+	              // Remove leading http tab and spaces. See RFC for examples.
+	              // https://datatracker.ietf.org/doc/html/rfc6266#section-5
+	              collectASequenceOfBytes(
+	                (char) => char === 0x20 || char === 0x09,
+	                input,
+	                position
+	              );
+
+	              position.position++; // skip past " after removing whitespace
+
+	              // 2. Set filename to the result of parsing a multipart/form-data name given
+	              //    input and position, if the result is not failure. Otherwise, return failure.
+	              filename = parseMultipartFormDataName(input, position);
+	            }
 	          }
-
-	          if (attribute.name === 'name') {
-	            name = attribute.value;
-	          } else if (attribute.name === 'filename') {
-	            filename = attribute.value;
-	          }
-	        }
-
-	        if (name === null) {
-	          throw parsingError('name attribute is required in content-disposition header')
 	        }
 
 	        break
@@ -9271,6 +8947,43 @@ function requireFormdataParser () {
 	      position.position += 2;
 	    }
 	  }
+	}
+
+	/**
+	 * @see https://andreubotella.github.io/multipart-form-data/#parse-a-multipart-form-data-name
+	 * @param {Buffer} input
+	 * @param {{ position: number }} position
+	 */
+	function parseMultipartFormDataName (input, position) {
+	  // 1. Assert: The byte at (position - 1) is 0x22 (").
+	  assert(input[position.position - 1] === 0x22);
+
+	  // 2. Let name be the result of collecting a sequence of bytes that are not 0x0A (LF), 0x0D (CR) or 0x22 ("), given position.
+	  /** @type {string | Buffer} */
+	  let name = collectASequenceOfBytes(
+	    (char) => char !== 0x0a && char !== 0x0d && char !== 0x22,
+	    input,
+	    position
+	  );
+
+	  // 3. If the byte at position is not 0x22 ("), return failure. Otherwise, advance position by 1.
+	  if (input[position.position] !== 0x22) {
+	    throw parsingError('expected "')
+	  } else {
+	    position.position++;
+	  }
+
+	  // 4. Replace any occurrence of the following subsequences in name with the given byte:
+	  // - `%0A`: 0x0A (LF)
+	  // - `%0D`: 0x0D (CR)
+	  // - `%22`: 0x22 (")
+	  name = new TextDecoder().decode(name)
+	    .replace(/%0A/ig, '\n')
+	    .replace(/%0D/ig, '\r')
+	    .replace(/%22/g, '"');
+
+	  // 5. Return the UTF-8 decoding without BOM of name.
+	  return name
 	}
 
 	/**
@@ -9334,58 +9047,6 @@ function requireFormdataParser () {
 	  return new TypeError('Failed to parse body as FormData.', { cause: new TypeError(cause) })
 	}
 
-	/**
-	 * CTL            = <any US-ASCII control character
-	 *                  (octets 0 - 31) and DEL (127)>
-	 * @param {number} char
-	 */
-	function isCTL (char) {
-	  return char <= 0x1f || char === 0x7f
-	}
-
-	/**
-	 * tspecials :=  "(" / ")" / "<" / ">" / "@" /
-	 *                "," / ";" / ":" / "\" / <">
-	 *                "/" / "[" / "]" / "?" / "="
-	 *                ; Must be in quoted-string,
-	 *                ; to use within parameter values
-	 * @param {number} char
-	 */
-	function isTSpecial (char) {
-	  return (
-	    char === 0x28 || // (
-	    char === 0x29 || // )
-	    char === 0x3c || // <
-	    char === 0x3e || // >
-	    char === 0x40 || // @
-	    char === 0x2c || // ,
-	    char === 0x3b || // ;
-	    char === 0x3a || // :
-	    char === 0x5c || // \
-	    char === 0x22 || // "
-	    char === 0x2f || // /
-	    char === 0x5b || // [
-	    char === 0x5d || // ]
-	    char === 0x3f || // ?
-	    char === 0x3d    // +
-	  )
-	}
-
-	/**
-	 * token := 1*<any (US-ASCII) CHAR except SPACE, CTLs,
-	 *          or tspecials>
-	 * @param {number} char
-	 */
-	function isToken (char) {
-	  return (
-	    char <= 0x7f &&  // ascii
-	    char !== 0x20 && // space
-	    char !== 0x09 &&
-	    !isCTL(char) &&
-	    !isTSpecial(char)
-	  )
-	}
-
 	formdataParser = {
 	  multipartFormDataParser,
 	  validateBoundary
@@ -9441,7 +9102,8 @@ function requireBody () {
 	  ReadableStreamFrom,
 	  readableStreamClose,
 	  fullyReadBody,
-	  extractMimeType
+	  extractMimeType,
+	  utf8DecodeBytes
 	} = requireUtil$4();
 	const { FormData, setFormDataState } = requireFormdata();
 	const { webidl } = requireWebidl();
@@ -9451,13 +9113,15 @@ function requireBody () {
 	const { serializeAMimeType } = requireDataUrl();
 	const { multipartFormDataParser } = requireFormdataParser();
 	const { createDeferredPromise } = requirePromise();
-	const { parseJSONFromBytes } = requireInfra();
-	const { utf8DecodeBytes } = requireEncoding();
-	const { runtimeFeatures } = requireRuntimeFeatures();
 
-	const random = runtimeFeatures.has('crypto')
-	  ? require$$2$3.randomInt
-	  : (max) => Math.floor(Math.random() * max);
+	let random;
+
+	try {
+	  const crypto = require('node:crypto');
+	  random = (max) => crypto.randomInt(0, max);
+	} catch {
+	  random = (max) => Math.floor(Math.random() * max);
+	}
 
 	const textEncoder = new TextEncoder();
 	function noop () {}
@@ -9658,33 +9322,32 @@ function requireBody () {
 	    // Run action.
 	    let iterator;
 	    stream = new ReadableStream({
-	      start () {
+	      async start () {
 	        iterator = action(object)[Symbol.asyncIterator]();
 	      },
-	      pull (controller) {
-	        return iterator.next().then(({ value, done }) => {
-	          if (done) {
-	            // When running action is done, close stream.
-	            queueMicrotask(() => {
-	              controller.close();
-	              controller.byobRequest?.respond(0);
-	            });
-	          } else {
-	            // Whenever one or more bytes are available and stream is not errored,
-	            // enqueue a Uint8Array wrapping an ArrayBuffer containing the available
-	            // bytes into stream.
-	            if (!isErrored(stream)) {
-	              const buffer = new Uint8Array(value);
-	              if (buffer.byteLength) {
-	                controller.enqueue(buffer);
-	              }
+	      async pull (controller) {
+	        const { value, done } = await iterator.next();
+	        if (done) {
+	          // When running action is done, close stream.
+	          queueMicrotask(() => {
+	            controller.close();
+	            controller.byobRequest?.respond(0);
+	          });
+	        } else {
+	          // Whenever one or more bytes are available and stream is not errored,
+	          // enqueue a Uint8Array wrapping an ArrayBuffer containing the available
+	          // bytes into stream.
+	          if (!isErrored(stream)) {
+	            const buffer = new Uint8Array(value);
+	            if (buffer.byteLength) {
+	              controller.enqueue(buffer);
 	            }
 	          }
-	          return controller.desiredSize > 0
-	        })
+	        }
+	        return controller.desiredSize > 0
 	      },
-	      cancel (reason) {
-	        return iterator.return()
+	      async cancel (reason) {
+	        await iterator.return();
 	      },
 	      type: 'bytes'
 	    });
@@ -9931,6 +9594,14 @@ function requireBody () {
 	}
 
 	/**
+	 * @see https://infra.spec.whatwg.org/#parse-json-bytes-to-a-javascript-value
+	 * @param {Uint8Array} bytes
+	 */
+	function parseJSONFromBytes (bytes) {
+	  return JSON.parse(utf8DecodeBytes(bytes))
+	}
+
+	/**
 	 * @see https://fetch.spec.whatwg.org/#concept-body-mime-type
 	 * @param {any} requestOrResponse internal state
 	 */
@@ -10048,10 +9719,12 @@ function requireClientH1 () {
 	  if (useWasmSIMD) {
 	    try {
 	      mod = new WebAssembly.Module(requireLlhttp_simdWasm());
+	      /* istanbul ignore next */
 	    } catch {
 	    }
 	  }
 
+	  /* istanbul ignore next */
 	  if (!mod) {
 	    // We could check if the error was caused by the simd option not
 	    // being enabled, but the occurring of this other error
@@ -10069,6 +9742,7 @@ function requireClientH1 () {
 	       * @returns {number}
 	       */
 	      wasm_on_url: (p, at, len) => {
+	        /* istanbul ignore next */
 	        return 0
 	      },
 	      /**
@@ -10233,6 +9907,7 @@ function requireClientH1 () {
 
 	      this.timeoutValue = delay;
 	    } else if (this.timeout) {
+	      // istanbul ignore else: only for jest
 	      if (this.timeout.refresh) {
 	        this.timeout.refresh();
 	      }
@@ -10253,6 +9928,7 @@ function requireClientH1 () {
 
 	    assert(this.timeoutType === TIMEOUT_BODY);
 	    if (this.timeout) {
+	      // istanbul ignore else: only for jest
 	      if (this.timeout.refresh) {
 	        this.timeout.refresh();
 	      }
@@ -10322,6 +9998,7 @@ function requireClientH1 () {
 	        } else {
 	          const ptr = llhttp.llhttp_get_error_reason(this.ptr);
 	          let message = '';
+	          /* istanbul ignore else: difficult to make a test case for */
 	          if (ptr) {
 	            const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
 	            message =
@@ -10367,6 +10044,7 @@ function requireClientH1 () {
 	  onMessageBegin () {
 	    const { socket, client } = this;
 
+	    /* istanbul ignore next: difficult to make a test case for */
 	    if (socket.destroyed) {
 	      return -1
 	    }
@@ -10495,12 +10173,14 @@ function requireClientH1 () {
 	  onHeadersComplete (statusCode, upgrade, shouldKeepAlive) {
 	    const { client, socket, headers, statusText } = this;
 
+	    /* istanbul ignore next: difficult to make a test case for */
 	    if (socket.destroyed) {
 	      return -1
 	    }
 
 	    const request = client[kQueue][client[kRunningIdx]];
 
+	    /* istanbul ignore next: difficult to make a test case for */
 	    if (!request) {
 	      return -1
 	    }
@@ -10534,6 +10214,7 @@ function requireClientH1 () {
 	        : client[kBodyTimeout];
 	      this.setTimeout(bodyTimeout, TIMEOUT_BODY);
 	    } else if (this.timeout) {
+	      // istanbul ignore else: only for jest
 	      if (this.timeout.refresh) {
 	        this.timeout.refresh();
 	      }
@@ -10614,6 +10295,7 @@ function requireClientH1 () {
 
 	    assert(this.timeoutType === TIMEOUT_BODY);
 	    if (this.timeout) {
+	      // istanbul ignore else: only for jest
 	      if (this.timeout.refresh) {
 	        this.timeout.refresh();
 	      }
@@ -10669,6 +10351,7 @@ function requireClientH1 () {
 	      return 0
 	    }
 
+	    /* istanbul ignore next: should be handled by llhttp? */
 	    if (request.method !== 'HEAD' && contentLength && bytesRead !== parseInt(contentLength, 10)) {
 	      util.destroy(socket, new ResponseContentLengthMismatchError());
 	      return -1
@@ -10709,6 +10392,7 @@ function requireClientH1 () {
 	function onParserTimeout (parser) {
 	  const { socket, timeoutType, client, paused } = parser.deref();
 
+	  /* istanbul ignore else */
 	  if (timeoutType === TIMEOUT_HEADERS) {
 	    if (!socket[kWriting] || socket.writableNeedDrain || client[kRunning] > 1) {
 	      assert(!paused, 'cannot be paused while waiting for headers');
@@ -11115,6 +10799,7 @@ function requireClientH1 () {
 	    channels.sendHeaders.publish({ request, headers: header, socket });
 	  }
 
+	  /* istanbul ignore else: assertion */
 	  if (!body || bodyLength === 0) {
 	    writeBuffer(abort, null, client, request, socket, contentLength, header, expectsPayload);
 	  } else if (util.isBuffer(body)) {
@@ -11495,6 +11180,7 @@ function requireClientH1 () {
 
 	    if (!ret) {
 	      if (socket[kParser].timeout && socket[kParser].timeoutType === TIMEOUT_HEADERS) {
+	        // istanbul ignore else: only for jest
 	        if (socket[kParser].timeout.refresh) {
 	          socket[kParser].timeout.refresh();
 	        }
@@ -11545,6 +11231,7 @@ function requireClientH1 () {
 	    }
 
 	    if (socket[kParser].timeout && socket[kParser].timeoutType === TIMEOUT_HEADERS) {
+	      // istanbul ignore else: only for jest
 	      if (socket[kParser].timeout.refresh) {
 	        socket[kParser].timeout.refresh();
 	      }
@@ -11587,8 +11274,7 @@ function requireClientH2 () {
 	  RequestContentLengthMismatchError,
 	  RequestAbortedError,
 	  SocketError,
-	  InformationalError,
-	  InvalidArgumentError
+	  InformationalError
 	} = requireErrors();
 	const {
 	  kUrl,
@@ -11605,16 +11291,11 @@ function requireClientH2 () {
 	  kOnError,
 	  kMaxConcurrentStreams,
 	  kHTTP2Session,
-	  kHTTP2InitialWindowSize,
-	  kHTTP2ConnectionWindowSize,
 	  kResume,
 	  kSize,
 	  kHTTPContext,
 	  kClosed,
-	  kBodyTimeout,
-	  kEnableConnectProtocol,
-	  kRemoteSettings,
-	  kHTTP2Stream
+	  kBodyTimeout
 	} = requireSymbols();
 	const { channels } = requireDiagnostics();
 
@@ -11639,10 +11320,7 @@ function requireClientH2 () {
 	    HTTP2_HEADER_SCHEME,
 	    HTTP2_HEADER_CONTENT_LENGTH,
 	    HTTP2_HEADER_EXPECT,
-	    HTTP2_HEADER_STATUS,
-	    HTTP2_HEADER_PROTOCOL,
-	    NGHTTP2_REFUSED_STREAM,
-	    NGHTTP2_CANCEL
+	    HTTP2_HEADER_STATUS
 	  }
 	} = http2;
 
@@ -11669,16 +11347,12 @@ function requireClientH2 () {
 	function connectH2 (client, socket) {
 	  client[kSocket] = socket;
 
-	  const http2InitialWindowSize = client[kHTTP2InitialWindowSize];
-	  const http2ConnectionWindowSize = client[kHTTP2ConnectionWindowSize];
-
 	  const session = http2.connect(client[kUrl], {
 	    createConnection: () => socket,
 	    peerMaxConcurrentStreams: client[kMaxConcurrentStreams],
 	    settings: {
 	      // TODO(metcoder95): add support for PUSH
-	      enablePush: false,
-	      ...(http2InitialWindowSize != null ? { initialWindowSize: http2InitialWindowSize } : null)
+	      enablePush: false
 	    }
 	  });
 
@@ -11686,26 +11360,12 @@ function requireClientH2 () {
 	  session[kClient] = client;
 	  session[kSocket] = socket;
 	  session[kHTTP2Session] = null;
-	  // We set it to true by default in a best-effort; however once connected to an H2 server
-	  // we will check if extended CONNECT protocol is supported or not
-	  // and set this value accordingly.
-	  session[kEnableConnectProtocol] = false;
-	  // States whether or not we have received the remote settings from the server
-	  session[kRemoteSettings] = false;
-
-	  // Apply connection-level flow control once connected (if supported).
-	  if (http2ConnectionWindowSize) {
-	    util.addListener(session, 'connect', applyConnectionWindowSize.bind(session, http2ConnectionWindowSize));
-	  }
 
 	  util.addListener(session, 'error', onHttp2SessionError);
 	  util.addListener(session, 'frameError', onHttp2FrameError);
 	  util.addListener(session, 'end', onHttp2SessionEnd);
 	  util.addListener(session, 'goaway', onHttp2SessionGoAway);
 	  util.addListener(session, 'close', onHttp2SessionClose);
-	  util.addListener(session, 'remoteSettings', onHttp2RemoteSettings);
-	  // TODO (@metcoder95): implement SETTINGS support
-	  // util.addListener(session, 'localSettings', onHttp2RemoteSettings)
 
 	  session.unref();
 
@@ -11722,23 +11382,12 @@ function requireClientH2 () {
 	  return {
 	    version: 'h2',
 	    defaultPipelining: Infinity,
-	    /**
-	     * @param {import('../core/request.js')} request
-	     * @returns {boolean}
-	    */
 	    write (request) {
 	      return writeH2(client, request)
 	    },
-	    /**
-	     * @returns {void}
-	     */
 	    resume () {
 	      resumeH2(client);
 	    },
-	    /**
-	     * @param {Error | null} err
-	     * @param {() => void} callback
-	     */
 	    destroy (err, callback) {
 	      if (socket[kClosed]) {
 	        queueMicrotask(callback);
@@ -11746,43 +11395,10 @@ function requireClientH2 () {
 	        socket.destroy(err).on('close', callback);
 	      }
 	    },
-	    /**
-	     * @type {boolean}
-	     */
 	    get destroyed () {
 	      return socket.destroyed
 	    },
-	    /**
-	     * @param {import('../core/request.js')} request
-	     * @returns {boolean}
-	    */
-	    busy (request) {
-	      if (request != null) {
-	        if (client[kRunning] > 0) {
-	          // We are already processing requests
-
-	          // Non-idempotent request cannot be retried.
-	          // Ensure that no other requests are inflight and
-	          // could cause failure.
-	          if (request.idempotent === false) return true
-	          // Don't dispatch an upgrade until all preceding requests have completed.
-	          // Possibly, we do not have remote settings confirmed yet.
-	          if ((request.upgrade === 'websocket' || request.method === 'CONNECT') && session[kRemoteSettings] === false) return true
-	          // Request with stream or iterator body can error while other requests
-	          // are inflight and indirectly error those as well.
-	          // Ensure this doesn't happen by waiting for inflight
-	          // to complete before dispatching.
-
-	          // Request with stream or iterator body cannot be retried.
-	          // Ensure that no other requests are inflight and
-	          // could cause failure.
-	          if (util.bodyLength(request.body) !== 0 &&
-	            (util.isStream(request.body) || util.isAsyncIterable(request.body) || util.isFormDataLike(request.body))) return true
-	        } else {
-	          return (request.upgrade === 'websocket' || request.method === 'CONNECT') && session[kRemoteSettings] === false
-	        }
-	      }
-
+	    busy () {
 	      return false
 	    }
 	  }
@@ -11800,37 +11416,6 @@ function requireClientH2 () {
 	      client[kHTTP2Session].ref();
 	    }
 	  }
-	}
-
-	function applyConnectionWindowSize (connectionWindowSize) {
-	  try {
-	    if (typeof this.setLocalWindowSize === 'function') {
-	      this.setLocalWindowSize(connectionWindowSize);
-	    }
-	  } catch {
-	    // Best-effort only.
-	  }
-	}
-
-	function onHttp2RemoteSettings (settings) {
-	  // Fallbacks are a safe bet, remote setting will always override
-	  this[kClient][kMaxConcurrentStreams] = settings.maxConcurrentStreams ?? this[kClient][kMaxConcurrentStreams];
-	  /**
-	   * From RFC-8441
-	   * A sender MUST NOT send a SETTINGS_ENABLE_CONNECT_PROTOCOL parameter
-	   * with the value of 0 after previously sending a value of 1.
-	   */
-	  // Note: Cannot be tested in Node, it does not supports disabling the extended CONNECT protocol once enabled
-	  if (this[kRemoteSettings] === true && this[kEnableConnectProtocol] === true && settings.enableConnectProtocol === false) {
-	    const err = new InformationalError('HTTP/2: Server disabled extended CONNECT protocol against RFC-8441');
-	    this[kSocket][kError] = err;
-	    this[kClient][kOnError](err);
-	    return
-	  }
-
-	  this[kEnableConnectProtocol] = settings.enableConnectProtocol ?? this[kEnableConnectProtocol];
-	  this[kRemoteSettings] = true;
-	  this[kClient][kResume]();
 	}
 
 	function onHttp2SessionError (err) {
@@ -11964,8 +11549,8 @@ function requireClientH2 () {
 	  const { method, path, host, upgrade, expectContinue, signal, protocol, headers: reqHeaders } = request;
 	  let { body } = request;
 
-	  if (upgrade != null && upgrade !== 'websocket') {
-	    util.errorRequest(client, request, new InvalidArgumentError(`Custom upgrade "${upgrade}" not supported over HTTP/2`));
+	  if (upgrade) {
+	    util.errorRequest(client, request, new Error('Upgrade not supported for H2'));
 	    return false
 	  }
 
@@ -12046,75 +11631,26 @@ function requireClientH2 () {
 	    return false
 	  }
 
-	  if (upgrade || method === 'CONNECT') {
+	  if (method === 'CONNECT') {
 	    session.ref();
-
-	    if (upgrade === 'websocket') {
-	      // We cannot upgrade to websocket if extended CONNECT protocol is not supported
-	      if (session[kEnableConnectProtocol] === false) {
-	        util.errorRequest(client, request, new InformationalError('HTTP/2: Extended CONNECT protocol not supported by server'));
-	        session.unref();
-	        return false
-	      }
-
-	      // We force the method to CONNECT
-	      // as per RFC-8441
-	      // https://datatracker.ietf.org/doc/html/rfc8441#section-4
-	      headers[HTTP2_HEADER_METHOD] = 'CONNECT';
-	      headers[HTTP2_HEADER_PROTOCOL] = 'websocket';
-	      // :path and :scheme headers must be omitted when sending CONNECT but set if extended-CONNECT
-	      headers[HTTP2_HEADER_PATH] = path;
-
-	      if (protocol === 'ws:' || protocol === 'wss:') {
-	        headers[HTTP2_HEADER_SCHEME] = protocol === 'ws:' ? 'http' : 'https';
-	      } else {
-	        headers[HTTP2_HEADER_SCHEME] = protocol === 'http:' ? 'http' : 'https';
-	      }
-
-	      stream = session.request(headers, { endStream: false, signal });
-	      stream[kHTTP2Stream] = true;
-
-	      stream.once('response', (headers, _flags) => {
-	        const { [HTTP2_HEADER_STATUS]: statusCode, ...realHeaders } = headers;
-
-	        request.onUpgrade(statusCode, parseH2Headers(realHeaders), stream);
-
-	        ++session[kOpenStreams];
-	        client[kQueue][client[kRunningIdx]++] = null;
-	      });
-
-	      stream.on('error', () => {
-	        if (stream.rstCode === NGHTTP2_REFUSED_STREAM || stream.rstCode === NGHTTP2_CANCEL) {
-	          // NGHTTP2_REFUSED_STREAM (7) or NGHTTP2_CANCEL (8)
-	          // We do not treat those as errors as the server might
-	          // not support websockets and refuse the stream
-	          abort(new InformationalError(`HTTP/2: "stream error" received - code ${stream.rstCode}`));
-	        }
-	      });
-
-	      stream.once('close', () => {
-	        session[kOpenStreams] -= 1;
-	        if (session[kOpenStreams] === 0) session.unref();
-	      });
-
-	      stream.setTimeout(requestTimeout);
-	      return true
-	    }
-
-	    // TODO: consolidate once we support CONNECT properly
-	    // NOTE: We are already connected, streams are pending, first request
+	    // We are already connected, streams are pending, first request
 	    // will create a new stream. We trigger a request to create the stream and wait until
 	    // `ready` event is triggered
 	    // We disabled endStream to allow the user to write to the stream
 	    stream = session.request(headers, { endStream: false, signal });
-	    stream[kHTTP2Stream] = true;
-	    stream.on('response', headers => {
-	      const { [HTTP2_HEADER_STATUS]: statusCode, ...realHeaders } = headers;
 
-	      request.onUpgrade(statusCode, parseH2Headers(realHeaders), stream);
+	    if (!stream.pending) {
+	      request.onUpgrade(null, null, stream);
 	      ++session[kOpenStreams];
 	      client[kQueue][client[kRunningIdx]++] = null;
-	    });
+	    } else {
+	      stream.once('ready', () => {
+	        request.onUpgrade(null, null, stream);
+	        ++session[kOpenStreams];
+	        client[kQueue][client[kRunningIdx]++] = null;
+	      });
+	    }
+
 	    stream.once('close', () => {
 	      session[kOpenStreams] -= 1;
 	      if (session[kOpenStreams] === 0) session.unref();
@@ -12126,6 +11662,7 @@ function requireClientH2 () {
 
 	  // https://tools.ietf.org/html/rfc7540#section-8.3
 	  // :path and :scheme headers must be omitted when sending CONNECT
+
 	  headers[HTTP2_HEADER_PATH] = path;
 	  headers[HTTP2_HEADER_SCHEME] = protocol === 'http:' ? 'http' : 'https';
 
@@ -12165,12 +11702,12 @@ function requireClientH2 () {
 	    contentLength = request.contentLength;
 	  }
 
-	  if (!expectsPayload) {
+	  if (contentLength === 0 || !expectsPayload) {
 	    // https://tools.ietf.org/html/rfc7230#section-3.3.2
 	    // A user agent SHOULD NOT send a Content-Length header field when
 	    // the request message does not contain a payload body and the method
 	    // semantics do not anticipate such a body.
-	    // And for methods that don't expect a payload, omit Content-Length.
+
 	    contentLength = null;
 	  }
 
@@ -12186,7 +11723,7 @@ function requireClientH2 () {
 	  }
 
 	  if (contentLength != null) {
-	    assert(body || contentLength === 0, 'no body must not have content length');
+	    assert(body, 'no body must not have content length');
 	    headers[HTTP2_HEADER_CONTENT_LENGTH] = `${contentLength}`;
 	  }
 
@@ -12205,7 +11742,6 @@ function requireClientH2 () {
 	  if (expectContinue) {
 	    headers[HTTP2_HEADER_EXPECT] = '100-continue';
 	    stream = session.request(headers, { endStream: shouldEndStream, signal });
-	    stream[kHTTP2Stream] = true;
 
 	    stream.once('continue', writeBodyH2);
 	  } else {
@@ -12213,7 +11749,6 @@ function requireClientH2 () {
 	      endStream: shouldEndStream,
 	      signal
 	    });
-	    stream[kHTTP2Stream] = true;
 
 	    writeBodyH2();
 	  }
@@ -12322,6 +11857,7 @@ function requireClientH2 () {
 	  return true
 
 	  function writeBodyH2 () {
+	    /* istanbul ignore else: assertion */
 	    if (!body || contentLength === 0) {
 	      writeBuffer(
 	        abort,
@@ -12599,8 +12135,6 @@ function requireClient () {
 	  kOnError,
 	  kHTTPContext,
 	  kMaxConcurrentStreams,
-	  kHTTP2InitialWindowSize,
-	  kHTTP2ConnectionWindowSize,
 	  kResume
 	} = requireSymbols();
 	const connectH1 = requireClientH1();
@@ -12656,10 +12190,7 @@ function requireClient () {
 	    autoSelectFamilyAttemptTimeout,
 	    // h2
 	    maxConcurrentStreams,
-	    allowH2,
-	    useH2c,
-	    initialWindowSize,
-	    connectionWindowSize
+	    allowH2
 	  } = {}) {
 	    if (keepAlive !== undefined) {
 	      throw new InvalidArgumentError('unsupported keepAlive, use pipelining=0 instead')
@@ -12751,18 +12282,6 @@ function requireClient () {
 	      throw new InvalidArgumentError('maxConcurrentStreams must be a positive integer, greater than 0')
 	    }
 
-	    if (useH2c != null && typeof useH2c !== 'boolean') {
-	      throw new InvalidArgumentError('useH2c must be a valid boolean value')
-	    }
-
-	    if (initialWindowSize != null && (!Number.isInteger(initialWindowSize) || initialWindowSize < 1)) {
-	      throw new InvalidArgumentError('initialWindowSize must be a positive integer, greater than 0')
-	    }
-
-	    if (connectionWindowSize != null && (!Number.isInteger(connectionWindowSize) || connectionWindowSize < 1)) {
-	      throw new InvalidArgumentError('connectionWindowSize must be a positive integer, greater than 0')
-	    }
-
 	    super();
 
 	    if (typeof connect !== 'function') {
@@ -12770,7 +12289,6 @@ function requireClient () {
 	        ...tls,
 	        maxCachedSessions,
 	        allowH2,
-	        useH2c,
 	        socketPath,
 	        timeout: connectTimeout,
 	        ...(typeof autoSelectFamily === 'boolean' ? { autoSelectFamily, autoSelectFamilyAttemptTimeout } : undefined),
@@ -12798,14 +12316,6 @@ function requireClient () {
 	    this[kClosedResolve] = null;
 	    this[kMaxResponseSize] = maxResponseSize > -1 ? maxResponseSize : -1;
 	    this[kMaxConcurrentStreams] = maxConcurrentStreams != null ? maxConcurrentStreams : 100; // Max peerConcurrentStreams for a Node h2 server
-	    // HTTP/2 window sizes are set to higher defaults than Node.js core for better performance:
-	    // - initialWindowSize: 262144 (256KB) vs Node.js default 65535 (64KB - 1)
-	    //   Allows more data to be sent before requiring acknowledgment, improving throughput
-	    //   especially on high-latency networks. This matches common production HTTP/2 servers.
-	    // - connectionWindowSize: 524288 (512KB) vs Node.js default (none set)
-	    //   Provides better flow control for the entire connection across multiple streams.
-	    this[kHTTP2InitialWindowSize] = initialWindowSize != null ? initialWindowSize : 262144;
-	    this[kHTTP2ConnectionWindowSize] = connectionWindowSize != null ? connectionWindowSize : 524288;
 	    this[kHTTPContext] = null;
 
 	    // kQueue is built up of 3 sections separated by
@@ -12862,6 +12372,7 @@ function requireClient () {
 	    )
 	  }
 
+	  /* istanbul ignore: only used for test */
 	  [kConnect] (cb) {
 	    connect(this);
 	    this.once('connect', cb);
@@ -13387,8 +12898,8 @@ function requirePoolBase () {
 	      for (let i = 0; i < this[kClients].length; i++) {
 	        closeAll[i] = this[kClients][i].close();
 	      }
-	      return Promise.all(closeAll)
-	        .then(this[kClosedResolve])
+	      Promise.all(closeAll)
+	        .then(this[kClosedResolve]);
 	    }
 	  }
 
@@ -13817,16 +13328,6 @@ function requireBalancedPool () {
 	    return this
 	  }
 
-	  getUpstream (upstream) {
-	    const upstreamOrigin = parseOrigin(upstream).origin;
-
-	    return this[kClients].find((pool) => (
-	      pool[kUrl].origin === upstreamOrigin &&
-	      pool.closed !== true &&
-	      pool.destroyed !== true
-	    ))
-	  }
-
 	  get upstreams () {
 	    return this[kClients]
 	      .filter(dispatcher => dispatcher.closed !== true && dispatcher.destroyed !== true)
@@ -13892,151 +13393,6 @@ function requireBalancedPool () {
 
 	balancedPool = BalancedPool;
 	return balancedPool;
-}
-
-var roundRobinPool;
-var hasRequiredRoundRobinPool;
-
-function requireRoundRobinPool () {
-	if (hasRequiredRoundRobinPool) return roundRobinPool;
-	hasRequiredRoundRobinPool = 1;
-
-	const {
-	  PoolBase,
-	  kClients,
-	  kNeedDrain,
-	  kAddClient,
-	  kGetDispatcher,
-	  kRemoveClient
-	} = requirePoolBase();
-	const Client = requireClient();
-	const {
-	  InvalidArgumentError
-	} = requireErrors();
-	const util = requireUtil$5();
-	const { kUrl } = requireSymbols();
-	const buildConnector = requireConnect();
-
-	const kOptions = Symbol('options');
-	const kConnections = Symbol('connections');
-	const kFactory = Symbol('factory');
-	const kIndex = Symbol('index');
-
-	function defaultFactory (origin, opts) {
-	  return new Client(origin, opts)
-	}
-
-	class RoundRobinPool extends PoolBase {
-	  constructor (origin, {
-	    connections,
-	    factory = defaultFactory,
-	    connect,
-	    connectTimeout,
-	    tls,
-	    maxCachedSessions,
-	    socketPath,
-	    autoSelectFamily,
-	    autoSelectFamilyAttemptTimeout,
-	    allowH2,
-	    clientTtl,
-	    ...options
-	  } = {}) {
-	    if (connections != null && (!Number.isFinite(connections) || connections < 0)) {
-	      throw new InvalidArgumentError('invalid connections')
-	    }
-
-	    if (typeof factory !== 'function') {
-	      throw new InvalidArgumentError('factory must be a function.')
-	    }
-
-	    if (connect != null && typeof connect !== 'function' && typeof connect !== 'object') {
-	      throw new InvalidArgumentError('connect must be a function or an object')
-	    }
-
-	    if (typeof connect !== 'function') {
-	      connect = buildConnector({
-	        ...tls,
-	        maxCachedSessions,
-	        allowH2,
-	        socketPath,
-	        timeout: connectTimeout,
-	        ...(typeof autoSelectFamily === 'boolean' ? { autoSelectFamily, autoSelectFamilyAttemptTimeout } : undefined),
-	        ...connect
-	      });
-	    }
-
-	    super();
-
-	    this[kConnections] = connections || null;
-	    this[kUrl] = util.parseOrigin(origin);
-	    this[kOptions] = { ...util.deepClone(options), connect, allowH2, clientTtl };
-	    this[kOptions].interceptors = options.interceptors
-	      ? { ...options.interceptors }
-	      : undefined;
-	    this[kFactory] = factory;
-	    this[kIndex] = -1;
-
-	    this.on('connect', (origin, targets) => {
-	      if (clientTtl != null && clientTtl > 0) {
-	        for (const target of targets) {
-	          Object.assign(target, { ttl: Date.now() });
-	        }
-	      }
-	    });
-
-	    this.on('connectionError', (origin, targets, error) => {
-	      for (const target of targets) {
-	        const idx = this[kClients].indexOf(target);
-	        if (idx !== -1) {
-	          this[kClients].splice(idx, 1);
-	        }
-	      }
-	    });
-	  }
-
-	  [kGetDispatcher] () {
-	    const clientTtlOption = this[kOptions].clientTtl;
-	    const clientsLength = this[kClients].length;
-
-	    // If we have no clients yet, create one
-	    if (clientsLength === 0) {
-	      const dispatcher = this[kFactory](this[kUrl], this[kOptions]);
-	      this[kAddClient](dispatcher);
-	      return dispatcher
-	    }
-
-	    // Round-robin through existing clients
-	    let checked = 0;
-	    while (checked < clientsLength) {
-	      this[kIndex] = (this[kIndex] + 1) % clientsLength;
-	      const client = this[kClients][this[kIndex]];
-
-	      // Check if client is stale (TTL expired)
-	      if (clientTtlOption != null && clientTtlOption > 0 && client.ttl && ((Date.now() - client.ttl) > clientTtlOption)) {
-	        this[kRemoveClient](client);
-	        checked++;
-	        continue
-	      }
-
-	      // Return client if it's not draining
-	      if (!client[kNeedDrain]) {
-	        return client
-	      }
-
-	      checked++;
-	    }
-
-	    // All clients are busy, create a new one if we haven't reached the limit
-	    if (!this[kConnections] || clientsLength < this[kConnections]) {
-	      const dispatcher = this[kFactory](this[kUrl], this[kOptions]);
-	      this[kAddClient](dispatcher);
-	      return dispatcher
-	    }
-	  }
-	}
-
-	roundRobinPool = RoundRobinPool;
-	return roundRobinPool;
 }
 
 var agent;
@@ -14217,7 +13573,6 @@ function requireProxyAgent () {
 	const { InvalidArgumentError, RequestAbortedError, SecureProxyConnectionError } = requireErrors();
 	const buildConnector = requireConnect();
 	const Client = requireClient();
-	const { channels } = requireDiagnostics();
 
 	const kAgent = Symbol('proxy agent');
 	const kClient = Symbol('proxy client');
@@ -14361,7 +13716,7 @@ function requireProxyAgent () {
 	          requestedPath += `:${defaultProtocolPort(opts.protocol)}`;
 	        }
 	        try {
-	          const connectParams = {
+	          const { socket, statusCode } = await this[kClient].connect({
 	            origin,
 	            port,
 	            path: requestedPath,
@@ -14372,21 +13727,11 @@ function requireProxyAgent () {
 	              ...(opts.connections == null || opts.connections > 0 ? { 'proxy-connection': 'keep-alive' } : {})
 	            },
 	            servername: this[kProxyTls]?.servername || proxyHostname
-	          };
-	          const { socket, statusCode } = await this[kClient].connect(connectParams);
+	          });
 	          if (statusCode !== 200) {
 	            socket.on('error', noop).destroy();
 	            callback(new RequestAbortedError(`Proxy response (${statusCode}) !== 200 when HTTP Tunneling`));
-	            return
 	          }
-
-	          if (channels.proxyConnected.hasSubscribers) {
-	            channels.proxyConnected.publish({
-	              socket,
-	              connectParams
-	            });
-	          }
-
 	          if (opts.protocol !== 'https:') {
 	            callback(null, socket);
 	            return
@@ -14753,6 +14098,8 @@ function requireRetryHandler () {
 	    function shouldRetry (passedErr) {
 	      if (passedErr) {
 	        this.headersSent = true;
+
+	        this.headersSent = true;
 	        this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
 	        controller.resume();
 	        return
@@ -15104,11 +14451,18 @@ var hasRequiredH2cClient;
 function requireH2cClient () {
 	if (hasRequiredH2cClient) return h2cClient;
 	hasRequiredH2cClient = 1;
+	const { connect } = require$$0$4;
 
+	const { kClose, kDestroy } = requireSymbols();
 	const { InvalidArgumentError } = requireErrors();
-	const Client = requireClient();
+	const util = requireUtil$5();
 
-	class H2CClient extends Client {
+	const Client = requireClient();
+	const DispatcherBase = requireDispatcherBase();
+
+	class H2CClient extends DispatcherBase {
+	  #client = null
+
 	  constructor (origin, clientOpts) {
 	    if (typeof origin === 'string') {
 	      origin = new URL(origin);
@@ -15121,14 +14475,14 @@ function requireH2cClient () {
 	    }
 
 	    const { connect, maxConcurrentStreams, pipelining, ...opts } =
-	            clientOpts ?? {};
+	      clientOpts ?? {};
 	    let defaultMaxConcurrentStreams = 100;
 	    let defaultPipelining = 100;
 
 	    if (
 	      maxConcurrentStreams != null &&
-	            Number.isInteger(maxConcurrentStreams) &&
-	            maxConcurrentStreams > 0
+	      Number.isInteger(maxConcurrentStreams) &&
+	      maxConcurrentStreams > 0
 	    ) {
 	      defaultMaxConcurrentStreams = maxConcurrentStreams;
 	    }
@@ -15143,13 +14497,77 @@ function requireH2cClient () {
 	      )
 	    }
 
-	    super(origin, {
+	    super();
+
+	    this.#client = new Client(origin, {
 	      ...opts,
+	      connect: this.#buildConnector(connect),
 	      maxConcurrentStreams: defaultMaxConcurrentStreams,
 	      pipelining: defaultPipelining,
-	      allowH2: true,
-	      useH2c: true
+	      allowH2: true
 	    });
+	  }
+
+	  #buildConnector (connectOpts) {
+	    return (opts, callback) => {
+	      const timeout = connectOpts?.connectOpts ?? 10e3;
+	      const { hostname, port, pathname } = opts;
+	      const socket = connect({
+	        ...opts,
+	        host: hostname,
+	        port,
+	        pathname
+	      });
+
+	      // Set TCP keep alive options on the socket here instead of in connect() for the case of assigning the socket
+	      if (opts.keepAlive == null || opts.keepAlive) {
+	        const keepAliveInitialDelay =
+	          opts.keepAliveInitialDelay == null ? 60e3 : opts.keepAliveInitialDelay;
+	        socket.setKeepAlive(true, keepAliveInitialDelay);
+	      }
+
+	      socket.alpnProtocol = 'h2';
+
+	      const clearConnectTimeout = util.setupConnectTimeout(
+	        new WeakRef(socket),
+	        { timeout, hostname, port }
+	      );
+
+	      socket
+	        .setNoDelay(true)
+	        .once('connect', function () {
+	          queueMicrotask(clearConnectTimeout);
+
+	          if (callback) {
+	            const cb = callback;
+	            callback = null;
+	            cb(null, this);
+	          }
+	        })
+	        .on('error', function (err) {
+	          queueMicrotask(clearConnectTimeout);
+
+	          if (callback) {
+	            const cb = callback;
+	            callback = null;
+	            cb(err);
+	          }
+	        });
+
+	      return socket
+	    }
+	  }
+
+	  dispatch (opts, handler) {
+	    return this.#client.dispatch(opts, handler)
+	  }
+
+	  [kClose] () {
+	    return this.#client.close()
+	  }
+
+	  [kDestroy] () {
+	    return this.#client.destroy()
 	  }
 	}
 
@@ -16524,7 +15942,6 @@ function requireApiUpgrade () {
 	const { AsyncResource } = require$$1$3;
 	const assert = require$$0$2;
 	const util = requireUtil$5();
-	const { kHTTP2Stream } = requireSymbols();
 	const { addSignal, removeSignal } = requireAbortSignal();
 
 	class UpgradeHandler extends AsyncResource {
@@ -16571,7 +15988,7 @@ function requireApiUpgrade () {
 	  }
 
 	  onUpgrade (statusCode, rawHeaders, socket) {
-	    assert(socket[kHTTP2Stream] === true ? statusCode === 200 : statusCode === 101);
+	    assert(statusCode === 101);
 
 	    const { callback, opaque, context } = this;
 
@@ -17184,7 +16601,8 @@ function requireMockUtils () {
 	      // synchronously throw the error, which breaks some tests.
 	      // Rather, we wait for the callback to resolve if it is a
 	      // promise, and then re-run handleReply with the new body.
-	      return body.then((newData) => handleReply(mockDispatches, newData))
+	      body.then((newData) => handleReply(mockDispatches, newData));
+	      return
 	    }
 
 	    const responseData = getResponseData(body);
@@ -17243,18 +16661,6 @@ function requireMockUtils () {
 	  return false
 	}
 
-	function normalizeOrigin (origin) {
-	  if (typeof origin !== 'string' && !(origin instanceof URL)) {
-	    return origin
-	  }
-
-	  if (origin instanceof URL) {
-	    return origin.origin
-	  }
-
-	  return origin.toLowerCase()
-	}
-
 	function buildAndValidateMockOptions (opts) {
 	  const { agent, ...mockOptions } = opts;
 
@@ -17289,8 +16695,7 @@ function requireMockUtils () {
 	  buildAndValidateMockOptions,
 	  getHeaderByName,
 	  buildHeadersFromArray,
-	  normalizeSearchParams,
-	  normalizeOrigin
+	  normalizeSearchParams
 	};
 	return mockUtils;
 }
@@ -18002,7 +17407,7 @@ function requireMockAgent () {
 	} = requireMockSymbols();
 	const MockClient = requireMockClient();
 	const MockPool = requireMockPool();
-	const { matchValue, normalizeSearchParams, buildAndValidateMockOptions, normalizeOrigin } = requireMockUtils();
+	const { matchValue, normalizeSearchParams, buildAndValidateMockOptions } = requireMockUtils();
 	const { InvalidArgumentError, UndiciError } = requireErrors();
 	const Dispatcher = requireDispatcher();
 	const PendingInterceptorsFormatter = requirePendingInterceptorsFormatter();
@@ -18036,9 +17441,9 @@ function requireMockAgent () {
 	  }
 
 	  get (origin) {
-	    // Normalize origin to handle URL objects and case-insensitive hostnames
-	    const normalizedOrigin = normalizeOrigin(origin);
-	    const originKey = this[kIgnoreTrailingSlash] ? normalizedOrigin.replace(/\/$/, '') : normalizedOrigin;
+	    const originKey = this[kIgnoreTrailingSlash]
+	      ? origin.replace(/\/$/, '')
+	      : origin;
 
 	    let dispatcher = this[kMockAgentGet](originKey);
 
@@ -18050,8 +17455,6 @@ function requireMockAgent () {
 	  }
 
 	  dispatch (opts, handler) {
-	    opts.origin = normalizeOrigin(opts.origin);
-
 	    // Call MockAgent.get to perform additional setup before dispatching as normal
 	    this.get(opts.origin);
 
@@ -18221,7 +17624,6 @@ function requireSnapshotUtils () {
 	hasRequiredSnapshotUtils = 1;
 
 	const { InvalidArgumentError } = requireErrors();
-	const { runtimeFeatures } = requireRuntimeFeatures();
 
 	/**
 	 * @typedef {Object} HeaderFilters
@@ -18246,9 +17648,10 @@ function requireSnapshotUtils () {
 	  }
 	}
 
-	const crypto = runtimeFeatures.has('crypto')
-	  ? require$$2$3
-	  : null;
+	let crypto;
+	try {
+	  crypto = require('node:crypto');
+	} catch { /* Fallback if crypto is not available */ }
 
 	/**
 	 * @callback HashIdFunction
@@ -18386,9 +17789,9 @@ function requireSnapshotRecorder () {
 	if (hasRequiredSnapshotRecorder) return snapshotRecorder;
 	hasRequiredSnapshotRecorder = 1;
 
-	const { writeFile, readFile, mkdir } = require$$0$8;
+	const { writeFile, readFile, mkdir } = require$$0$9;
 	const { dirname, resolve } = require$$1$5;
-	const { setTimeout, clearTimeout } = require$$2$4;
+	const { setTimeout, clearTimeout } = require$$2$2;
 	const { InvalidArgumentError, UndiciError } = requireErrors();
 	const { hashId, isUrlExcludedFactory, normalizeHeaders, createHeaderFilters } = requireSnapshotUtils();
 
@@ -18669,7 +18072,8 @@ function requireSnapshotRecorder () {
 	    }
 
 	    // Check URL exclusion patterns
-	    if (this.isUrlExcluded(requestOpts)) {
+	    const url = new URL(requestOpts.path, requestOpts.origin).toString();
+	    if (this.#isUrlExcluded(url)) {
 	      return // Skip recording
 	    }
 
@@ -18716,16 +18120,6 @@ function requireSnapshotRecorder () {
 	  }
 
 	  /**
-	   * Checks if a URL should be excluded from recording/playback
-	   * @param {SnapshotRequestOptions} requestOpts - Request options to check
-	   * @returns {boolean} - True if URL is excluded
-	   */
-	  isUrlExcluded (requestOpts) {
-	    const url = new URL(requestOpts.path, requestOpts.origin).toString();
-	    return this.#isUrlExcluded(url)
-	  }
-
-	  /**
 	   * Finds a matching snapshot for the given request
 	   * Returns the appropriate response based on call count for sequential responses
 	   *
@@ -18739,7 +18133,8 @@ function requireSnapshotRecorder () {
 	    }
 
 	    // Check URL exclusion patterns
-	    if (this.isUrlExcluded(requestOpts)) {
+	    const url = new URL(requestOpts.path, requestOpts.origin).toString();
+	    if (this.#isUrlExcluded(url)) {
 	      return undefined // Skip playback
 	    }
 
@@ -19046,9 +18441,7 @@ function requireSnapshotAgent () {
 	    this[kSnapshotLoaded] = false;
 
 	    // For recording/update mode, we need a real agent to make actual requests
-	    // For playback mode, we need a real agent if there are excluded URLs
-	    if (this[kSnapshotMode] === 'record' || this[kSnapshotMode] === 'update' ||
-	        (this[kSnapshotMode] === 'playback' && opts.excludeUrls && opts.excludeUrls.length > 0)) {
+	    if (this[kSnapshotMode] === 'record' || this[kSnapshotMode] === 'update') {
 	      this[kRealAgent] = new Agent(opts);
 	    }
 
@@ -19063,12 +18456,6 @@ function requireSnapshotAgent () {
 	  dispatch (opts, handler) {
 	    handler = WrapHandler.wrap(handler);
 	    const mode = this[kSnapshotMode];
-
-	    // Check if URL should be excluded (pass through without mocking/recording)
-	    if (this[kSnapshotRecorder].isUrlExcluded(opts)) {
-	      // Real agent is guaranteed by constructor when excludeUrls is configured
-	      return this[kRealAgent].dispatch(opts, handler)
-	    }
 
 	    if (mode === 'playback' || mode === 'update') {
 	      // Ensure snapshots are loaded
@@ -19152,9 +18539,11 @@ function requireSnapshotAgent () {
 	          headers: responseData.headers,
 	          body: responseBody,
 	          trailers: responseData.trailers
-	        })
-	          .then(() => handler.onResponseEnd(controller, trailers))
-	          .catch((error) => handler.onResponseError(controller, error));
+	        }).then(() => {
+	          handler.onResponseEnd(controller, trailers);
+	        }).catch((error) => {
+	          handler.onResponseError(controller, error);
+	        });
 	      }
 	    };
 
@@ -19987,44 +19376,14 @@ function requireDns () {
 	const { InvalidArgumentError, InformationalError } = requireErrors();
 	const maxInt = Math.pow(2, 31) - 1;
 
-	class DNSStorage {
-	  #maxItems = 0
-	  #records = new Map()
-
-	  constructor (opts) {
-	    this.#maxItems = opts.maxItems;
-	  }
-
-	  get size () {
-	    return this.#records.size
-	  }
-
-	  get (hostname) {
-	    return this.#records.get(hostname) ?? null
-	  }
-
-	  set (hostname, records) {
-	    this.#records.set(hostname, records);
-	  }
-
-	  delete (hostname) {
-	    this.#records.delete(hostname);
-	  }
-
-	  // Delegate to storage decide can we do more lookups or not
-	  full () {
-	    return this.size >= this.#maxItems
-	  }
-	}
-
 	class DNSInstance {
 	  #maxTTL = 0
 	  #maxItems = 0
+	  #records = new Map()
 	  dualStack = true
 	  affinity = null
 	  lookup = null
 	  pick = null
-	  storage = null
 
 	  constructor (opts) {
 	    this.#maxTTL = opts.maxTTL;
@@ -20033,14 +19392,17 @@ function requireDns () {
 	    this.affinity = opts.affinity;
 	    this.lookup = opts.lookup ?? this.#defaultLookup;
 	    this.pick = opts.pick ?? this.#defaultPick;
-	    this.storage = opts.storage ?? new DNSStorage(opts);
+	  }
+
+	  get full () {
+	    return this.#records.size === this.#maxItems
 	  }
 
 	  runLookup (origin, opts, cb) {
-	    const ips = this.storage.get(origin.hostname);
+	    const ips = this.#records.get(origin.hostname);
 
 	    // If full, we just return the origin
-	    if (ips == null && this.storage.full()) {
+	    if (ips == null && this.full) {
 	      cb(null, origin);
 	      return
 	    }
@@ -20064,7 +19426,7 @@ function requireDns () {
 	        }
 
 	        this.setRecords(origin, addresses);
-	        const records = this.storage.get(origin.hostname);
+	        const records = this.#records.get(origin.hostname);
 
 	        const ip = this.pick(
 	          origin,
@@ -20098,7 +19460,7 @@ function requireDns () {
 
 	      // If no IPs we lookup - deleting old records
 	      if (ip == null) {
-	        this.storage.delete(origin.hostname);
+	        this.#records.delete(origin.hostname);
 	        this.runLookup(origin, opts, cb);
 	        return
 	      }
@@ -20202,7 +19564,7 @@ function requireDns () {
 	  }
 
 	  pickFamily (origin, ipFamily) {
-	    const records = this.storage.get(origin.hostname)?.records;
+	    const records = this.#records.get(origin.hostname)?.records;
 	    if (!records) {
 	      return null
 	    }
@@ -20236,13 +19598,11 @@ function requireDns () {
 	  setRecords (origin, addresses) {
 	    const timestamp = Date.now();
 	    const records = { records: { 4: null, 6: null } };
-	    let minTTL = this.#maxTTL;
 	    for (const record of addresses) {
 	      record.timestamp = timestamp;
 	      if (typeof record.ttl === 'number') {
 	        // The record TTL is expected to be in ms
 	        record.ttl = Math.min(record.ttl, this.#maxTTL);
-	        minTTL = Math.min(minTTL, record.ttl);
 	      } else {
 	        record.ttl = this.#maxTTL;
 	      }
@@ -20253,12 +19613,11 @@ function requireDns () {
 	      records.records[record.family] = familyRecords;
 	    }
 
-	    // We provide a default TTL if external storage will be used without TTL per record-level support
-	    this.storage.set(origin.hostname, records, { ttl: minTTL });
+	    this.#records.set(origin.hostname, records);
 	  }
 
 	  deleteRecords (origin) {
-	    this.storage.delete(origin.hostname);
+	    this.#records.delete(origin.hostname);
 	  }
 
 	  getHandler (meta, opts) {
@@ -20384,17 +19743,6 @@ function requireDns () {
 	    throw new InvalidArgumentError('Invalid pick. Must be a function')
 	  }
 
-	  if (
-	    interceptorOpts?.storage != null &&
-	    (typeof interceptorOpts?.storage?.get !== 'function' ||
-	      typeof interceptorOpts?.storage?.set !== 'function' ||
-	      typeof interceptorOpts?.storage?.full !== 'function' ||
-	      typeof interceptorOpts?.storage?.delete !== 'function'
-	    )
-	  ) {
-	    throw new InvalidArgumentError('Invalid storage. Must be a object with methods: { get, set, full, delete }')
-	  }
-
 	  const dualStack = interceptorOpts?.dualStack ?? true;
 	  let affinity;
 	  if (dualStack) {
@@ -20409,8 +19757,7 @@ function requireDns () {
 	    pick: interceptorOpts?.pick ?? null,
 	    dualStack,
 	    affinity,
-	    maxItems: interceptorOpts?.maxItems ?? Infinity,
-	    storage: interceptorOpts?.storage
+	    maxItems: interceptorOpts?.maxItems ?? Infinity
 	  };
 
 	  const instance = new DNSInstance(opts);
@@ -20828,33 +20175,6 @@ function requireCache$2 () {
 	  }
 	}
 
-	/**
-	 * Creates a string key for request deduplication purposes.
-	 * This key is used to identify in-flight requests that can be shared.
-	 * @param {import('../../types/cache-interceptor.d.ts').default.CacheKey} cacheKey
-	 * @param {Set<string>} [excludeHeaders] Set of lowercase header names to exclude from the key
-	 * @returns {string}
-	 */
-	function makeDeduplicationKey (cacheKey, excludeHeaders) {
-	  // Create a deterministic string key from the cache key
-	  // Include origin, method, path, and sorted headers
-	  let key = `${cacheKey.origin}:${cacheKey.method}:${cacheKey.path}`;
-
-	  if (cacheKey.headers) {
-	    const sortedHeaders = Object.keys(cacheKey.headers).sort();
-	    for (const header of sortedHeaders) {
-	      // Skip excluded headers
-	      if (excludeHeaders?.has(header.toLowerCase())) {
-	        continue
-	      }
-	      const value = cacheKey.headers[header];
-	      key += `:${header}=${Array.isArray(value) ? value.join(',') : value}`;
-	    }
-	  }
-
-	  return key
-	}
-
 	cache$2 = {
 	  makeCacheKey,
 	  normalizeHeaders,
@@ -20864,8 +20184,7 @@ function requireCache$2 () {
 	  parseVaryHeader,
 	  isEtagUsable,
 	  assertCacheMethods,
-	  assertCacheStore,
-	  makeDeduplicationKey
+	  assertCacheStore
 	};
 	return cache$2;
 }
@@ -21555,11 +20874,11 @@ function requireCacheHandler () {
 
 	// Status codes which semantic is not handled by the cache
 	// https://datatracker.ietf.org/doc/html/rfc9111#section-3
-	// This list should not grow beyond 206 unless the RFC is updated
+	// This list should not grow beyond 206 and 304 unless the RFC is updated
 	// by a newer one including more. Please introduce another list if
 	// implementing caching of responses with the 'must-understand' directive.
 	const NOT_UNDERSTOOD_STATUS_CODES = [
-	  206
+	  206, 304
 	];
 
 	const MAX_RESPONSE_AGE = 2147483647000;
@@ -21642,7 +20961,6 @@ function requireCacheHandler () {
 	        resHeaders,
 	        statusMessage
 	      );
-	    const handler = this;
 
 	    if (
 	      !util.safeHTTPMethods.includes(this.#cacheKey.method) &&
@@ -21728,92 +21046,36 @@ function requireCacheHandler () {
 	      deleteAt
 	    };
 
-	    // Not modified, re-use the cached value
-	    // https://www.rfc-editor.org/rfc/rfc9111.html#name-handling-304-not-modified
-	    if (statusCode === 304) {
-	      /**
-	       * @type {import('../../types/cache-interceptor.d.ts').default.CacheValue}
-	       */
-	      const cachedValue = this.#store.get(this.#cacheKey);
-	      if (!cachedValue) {
-	        // Do not create a new cache entry, as a 304 won't have a body - so cannot be cached.
-	        return downstreamOnHeaders()
-	      }
-
-	      // Re-use the cached value: statuscode, statusmessage, headers and body
-	      value.statusCode = cachedValue.statusCode;
-	      value.statusMessage = cachedValue.statusMessage;
-	      value.etag = cachedValue.etag;
-	      value.headers = { ...cachedValue.headers, ...strippedHeaders };
-
-	      downstreamOnHeaders();
-
-	      this.#writeStream = this.#store.createWriteStream(this.#cacheKey, value);
-
-	      if (!this.#writeStream || !cachedValue?.body) {
-	        return
-	      }
-
-	      const bodyIterator = cachedValue.body.values();
-
-	      const streamCachedBody = () => {
-	        for (const chunk of bodyIterator) {
-	          const full = this.#writeStream.write(chunk) === false;
-	          this.#handler.onResponseData?.(controller, chunk);
-	          // when stream is full stop writing until we get a 'drain' event
-	          if (full) {
-	            break
-	          }
-	        }
-	      };
-
-	      this.#writeStream
-	        .on('error', function () {
-	          handler.#writeStream = undefined;
-	          handler.#store.delete(handler.#cacheKey);
-	        })
-	        .on('drain', () => {
-	          streamCachedBody();
-	        })
-	        .on('close', function () {
-	          if (handler.#writeStream === this) {
-	            handler.#writeStream = undefined;
-	          }
-	        });
-
-	      streamCachedBody();
-	    } else {
-	      if (typeof resHeaders.etag === 'string' && isEtagUsable(resHeaders.etag)) {
-	        value.etag = resHeaders.etag;
-	      }
-
-	      this.#writeStream = this.#store.createWriteStream(this.#cacheKey, value);
-
-	      if (!this.#writeStream) {
-	        return downstreamOnHeaders()
-	      }
-
-	      this.#writeStream
-	        .on('drain', () => controller.resume())
-	        .on('error', function () {
-	          // TODO (fix): Make error somehow observable?
-	          handler.#writeStream = undefined;
-
-	          // Delete the value in case the cache store is holding onto state from
-	          //  the call to createWriteStream
-	          handler.#store.delete(handler.#cacheKey);
-	        })
-	        .on('close', function () {
-	          if (handler.#writeStream === this) {
-	            handler.#writeStream = undefined;
-	          }
-
-	          // TODO (fix): Should we resume even if was paused downstream?
-	          controller.resume();
-	        });
-
-	      downstreamOnHeaders();
+	    if (typeof resHeaders.etag === 'string' && isEtagUsable(resHeaders.etag)) {
+	      value.etag = resHeaders.etag;
 	    }
+
+	    this.#writeStream = this.#store.createWriteStream(this.#cacheKey, value);
+	    if (!this.#writeStream) {
+	      return downstreamOnHeaders()
+	    }
+
+	    const handler = this;
+	    this.#writeStream
+	      .on('drain', () => controller.resume())
+	      .on('error', function () {
+	        // TODO (fix): Make error somehow observable?
+	        handler.#writeStream = undefined;
+
+	        // Delete the value in case the cache store is holding onto state from
+	        //  the call to createWriteStream
+	        handler.#store.delete(handler.#cacheKey);
+	      })
+	      .on('close', function () {
+	        if (handler.#writeStream === this) {
+	          handler.#writeStream = undefined;
+	        }
+
+	        // TODO (fix): Should we resume even if was paused downstream?
+	        controller.resume();
+	      });
+
+	    return downstreamOnHeaders()
 	  }
 
 	  onResponseData (controller, chunk) {
@@ -22456,59 +21718,25 @@ function requireCache$1 () {
 	const { AbortError } = requireErrors();
 
 	/**
-	 * @param {(string | RegExp)[] | undefined} origins
-	 * @param {string} name
-	 */
-	function assertCacheOrigins (origins, name) {
-	  if (origins === undefined) return
-	  if (!Array.isArray(origins)) {
-	    throw new TypeError(`expected ${name} to be an array or undefined, got ${typeof origins}`)
-	  }
-	  for (let i = 0; i < origins.length; i++) {
-	    const origin = origins[i];
-	    if (typeof origin !== 'string' && !(origin instanceof RegExp)) {
-	      throw new TypeError(`expected ${name}[${i}] to be a string or RegExp, got ${typeof origin}`)
-	    }
-	  }
-	}
-
-	const nop = () => {};
-
-	/**
 	 * @typedef {(options: import('../../types/dispatcher.d.ts').default.DispatchOptions, handler: import('../../types/dispatcher.d.ts').default.DispatchHandler) => void} DispatchFn
 	 */
 
 	/**
 	 * @param {import('../../types/cache-interceptor.d.ts').default.GetResult} result
 	 * @param {import('../../types/cache-interceptor.d.ts').default.CacheControlDirectives | undefined} cacheControlDirectives
-	 * @param {import('../../types/dispatcher.d.ts').default.RequestOptions} opts
 	 * @returns {boolean}
 	 */
-	function needsRevalidation (result, cacheControlDirectives, { headers = {} }) {
-	  // Always revalidate requests with the no-cache request directive.
+	function needsRevalidation (result, cacheControlDirectives) {
 	  if (cacheControlDirectives?.['no-cache']) {
+	    // Always revalidate requests with the no-cache request directive
 	    return true
 	  }
 
-	  // Always revalidate requests with unqualified no-cache response directive.
 	  if (result.cacheControlDirectives?.['no-cache'] && !Array.isArray(result.cacheControlDirectives['no-cache'])) {
+	    // Always revalidate requests with unqualified no-cache response directive
 	    return true
 	  }
 
-	  // Always revalidate requests with conditional headers.
-	  if (headers['if-modified-since'] || headers['if-none-match']) {
-	    return true
-	  }
-
-	  return false
-	}
-
-	/**
-	 * @param {import('../../types/cache-interceptor.d.ts').default.GetResult} result
-	 * @param {import('../../types/cache-interceptor.d.ts').default.CacheControlDirectives | undefined} cacheControlDirectives
-	 * @returns {boolean}
-	 */
-	function isStale (result, cacheControlDirectives) {
 	  const now = Date.now();
 	  if (now > result.staleAt) {
 	    // Response is stale
@@ -22582,7 +21810,7 @@ function requireCache$1 () {
 	      }
 
 	      if (typeof handler.onHeaders === 'function') {
-	        handler.onHeaders(504, [], nop, 'Gateway Timeout');
+	        handler.onHeaders(504, [], () => {}, 'Gateway Timeout');
 	        if (aborted) {
 	          return
 	        }
@@ -22719,11 +21947,8 @@ function requireCache$1 () {
 	    return dispatch(opts, handler)
 	  }
 
-	  const stale = isStale(result, reqCacheControl);
-	  const revalidate = needsRevalidation(result, reqCacheControl, opts);
-
 	  // Check if the response is stale
-	  if (stale || revalidate) {
+	  if (needsRevalidation(result, reqCacheControl)) {
 	    if (util.isStream(opts.body) && util.bodyLength(opts.body) !== 0) {
 	      // If body is a stream we can't revalidate...
 	      // TODO (fix): This could be less strict...
@@ -22731,8 +21956,8 @@ function requireCache$1 () {
 	    }
 
 	    // RFC 5861: If we're within stale-while-revalidate window, serve stale immediately
-	    // and revalidate in background, unless immediate revalidation is necessary
-	    if (!revalidate && withinStaleWhileRevalidateWindow(result)) {
+	    // and revalidate in background
+	    if (withinStaleWhileRevalidateWindow(result)) {
 	      // Serve stale response immediately
 	      sendCachedValue(handler, opts, result, age, null, true);
 
@@ -22806,10 +22031,9 @@ function requireCache$1 () {
 	      new CacheRevalidationHandler(
 	        (success, context) => {
 	          if (success) {
-	            // TODO: successful revalidation should be considered fresh (not give stale warning).
-	            sendCachedValue(handler, opts, result, age, context, stale);
+	            sendCachedValue(handler, opts, result, age, context, true);
 	          } else if (util.isStream(result.body)) {
-	            result.body.on('error', nop).destroy();
+	            result.body.on('error', () => {}).destroy();
 	          }
 	        },
 	        new CacheHandler(globalOpts, cacheKey, handler),
@@ -22820,7 +22044,7 @@ function requireCache$1 () {
 
 	  // Dump request body.
 	  if (util.isStream(opts.body)) {
-	    opts.body.on('error', nop).destroy();
+	    opts.body.on('error', () => {}).destroy();
 	  }
 
 	  sendCachedValue(handler, opts, result, age, null, false);
@@ -22835,8 +22059,7 @@ function requireCache$1 () {
 	    store = new MemoryCacheStore(),
 	    methods = ['GET'],
 	    cacheByDefault = undefined,
-	    type = 'shared',
-	    origins = undefined
+	    type = 'shared'
 	  } = opts;
 
 	  if (typeof opts !== 'object' || opts === null) {
@@ -22845,7 +22068,6 @@ function requireCache$1 () {
 
 	  assertCacheStore(store, 'opts.store');
 	  assertCacheMethods(methods, 'opts.methods');
-	  assertCacheOrigins(origins, 'opts.origins');
 
 	  if (typeof cacheByDefault !== 'undefined' && typeof cacheByDefault !== 'number') {
 	    throw new TypeError(`expected opts.cacheByDefault to be number or undefined, got ${typeof cacheByDefault}`)
@@ -22871,29 +22093,6 @@ function requireCache$1 () {
 	        return dispatch(opts, handler)
 	      }
 
-	      // Check if origin is in whitelist
-	      if (origins !== undefined) {
-	        const requestOrigin = opts.origin.toString().toLowerCase();
-	        let isAllowed = false;
-
-	        for (let i = 0; i < origins.length; i++) {
-	          const allowed = origins[i];
-	          if (typeof allowed === 'string') {
-	            if (allowed.toLowerCase() === requestOrigin) {
-	              isAllowed = true;
-	              break
-	            }
-	          } else if (allowed.test(requestOrigin)) {
-	            isAllowed = true;
-	            break
-	          }
-	        }
-
-	        if (!isAllowed) {
-	          return dispatch(opts, handler)
-	        }
-	      }
-
 	      opts = {
 	        ...opts,
 	        headers: normalizeHeaders(opts)
@@ -22914,17 +22113,18 @@ function requireCache$1 () {
 	      const result = store.get(cacheKey);
 
 	      if (result && typeof result.then === 'function') {
-	        return result
-	          .then(result => handleResult(dispatch,
+	        result.then(result => {
+	          handleResult(dispatch,
 	            globalOpts,
 	            cacheKey,
 	            handler,
 	            opts,
 	            reqCacheControl,
 	            result
-	          ))
+	          );
+	        });
 	      } else {
-	        return handleResult(
+	        handleResult(
 	          dispatch,
 	          globalOpts,
 	          cacheKey,
@@ -22932,8 +22132,10 @@ function requireCache$1 () {
 	          opts,
 	          reqCacheControl,
 	          result
-	        )
+	        );
 	      }
+
+	      return true
 	    }
 	  }
 	};
@@ -22947,10 +22149,9 @@ function requireDecompress () {
 	if (hasRequiredDecompress) return decompress;
 	hasRequiredDecompress = 1;
 
-	const { createInflate, createGunzip, createBrotliDecompress, createZstdDecompress } = require$$3$1;
+	const { createInflate, createGunzip, createBrotliDecompress, createZstdDecompress } = require$$0$8;
 	const { pipeline } = require$$0$3;
 	const DecoratorHandler = requireDecoratorHandler();
-	const { runtimeFeatures } = requireRuntimeFeatures();
 
 	/** @typedef {import('node:stream').Transform} Transform */
 	/** @typedef {import('node:stream').Transform} Controller */
@@ -22964,7 +22165,7 @@ function requireDecompress () {
 	  deflate: createInflate,
 	  compress: createInflate,
 	  'x-compress': createInflate,
-	  ...(runtimeFeatures.has('zstd') ? { zstd: createZstdDecompress } : {})
+	  ...(createZstdDecompress ? { zstd: createZstdDecompress } : {})
 	};
 
 	const defaultSkipStatusCodes = /** @type {const} */ ([204, 304]);
@@ -23011,17 +22212,9 @@ function requireDecompress () {
 	   *
 	   * @param {string} encodings - Comma-separated list of content encodings
 	   * @returns {Array<DecompressorStream>} - Array of decompressor streams
-	   * @throws {Error} - If the number of content-encodings exceeds the maximum allowed
 	   */
 	  #createDecompressionChain (encodings) {
 	    const parts = encodings.split(',');
-
-	    // Limit the number of content-encodings to prevent resource exhaustion.
-	    // CVE fix similar to urllib3 (GHSA-gm62-xv2j-4w53) and curl (CVE-2022-32206).
-	    const maxContentEncodings = 5;
-	    if (parts.length > maxContentEncodings) {
-	      throw new Error(`too many content-encodings in response: ${parts.length}, maximum allowed is ${maxContentEncodings}`)
-	    }
 
 	    /** @type {DecompressorStream[]} */
 	    const decompressors = [];
@@ -23208,816 +22401,6 @@ function requireDecompress () {
 
 	decompress = createDecompressInterceptor;
 	return decompress;
-}
-
-var deduplicationHandler;
-var hasRequiredDeduplicationHandler;
-
-function requireDeduplicationHandler () {
-	if (hasRequiredDeduplicationHandler) return deduplicationHandler;
-	hasRequiredDeduplicationHandler = 1;
-
-	/**
-	 * @typedef {import('../../types/dispatcher.d.ts').default.DispatchHandler} DispatchHandler
-	 */
-
-	/**
-	 * Handler that buffers response data and notifies multiple waiting handlers.
-	 * Used for request deduplication.
-	 *
-	 * @implements {DispatchHandler}
-	 */
-	class DeduplicationHandler {
-	  /**
-	   * @type {DispatchHandler}
-	   */
-	  #primaryHandler
-
-	  /**
-	   * @type {DispatchHandler[]}
-	   */
-	  #waitingHandlers = []
-
-	  /**
-	   * @type {Buffer[]}
-	   */
-	  #chunks = []
-
-	  /**
-	   * @type {number}
-	   */
-	  #statusCode = 0
-
-	  /**
-	   * @type {Record<string, string | string[]>}
-	   */
-	  #headers = {}
-
-	  /**
-	   * @type {string}
-	   */
-	  #statusMessage = ''
-
-	  /**
-	   * @type {boolean}
-	   */
-	  #aborted = false
-
-	  /**
-	   * @type {import('../../types/dispatcher.d.ts').default.DispatchController | null}
-	   */
-	  #controller = null
-
-	  /**
-	   * @type {(() => void) | null}
-	   */
-	  #onComplete = null
-
-	  /**
-	   * @param {DispatchHandler} primaryHandler The primary handler
-	   * @param {() => void} onComplete Callback when request completes
-	   */
-	  constructor (primaryHandler, onComplete) {
-	    this.#primaryHandler = primaryHandler;
-	    this.#onComplete = onComplete;
-	  }
-
-	  /**
-	   * Add a waiting handler that will receive the buffered response
-	   * @param {DispatchHandler} handler
-	   */
-	  addWaitingHandler (handler) {
-	    this.#waitingHandlers.push(handler);
-	  }
-
-	  /**
-	   * @param {() => void} abort
-	   * @param {any} context
-	   */
-	  onRequestStart (controller, context) {
-	    this.#controller = controller;
-	    this.#primaryHandler.onRequestStart?.(controller, context);
-	  }
-
-	  /**
-	   * @param {import('../../types/dispatcher.d.ts').default.DispatchController} controller
-	   * @param {number} statusCode
-	   * @param {import('../../types/header.d.ts').IncomingHttpHeaders} headers
-	   * @param {Socket} socket
-	   */
-	  onRequestUpgrade (controller, statusCode, headers, socket) {
-	    this.#primaryHandler.onRequestUpgrade?.(controller, statusCode, headers, socket);
-	  }
-
-	  /**
-	   * @param {import('../../types/dispatcher.d.ts').default.DispatchController} controller
-	   * @param {number} statusCode
-	   * @param {Record<string, string | string[]>} headers
-	   * @param {string} statusMessage
-	   */
-	  onResponseStart (controller, statusCode, headers, statusMessage) {
-	    this.#statusCode = statusCode;
-	    this.#headers = headers;
-	    this.#statusMessage = statusMessage;
-	    this.#primaryHandler.onResponseStart?.(controller, statusCode, headers, statusMessage);
-	  }
-
-	  /**
-	   * @param {import('../../types/dispatcher.d.ts').default.DispatchController} controller
-	   * @param {Buffer} chunk
-	   */
-	  onResponseData (controller, chunk) {
-	    // Buffer the chunk for waiting handlers
-	    this.#chunks.push(Buffer.from(chunk));
-	    this.#primaryHandler.onResponseData?.(controller, chunk);
-	  }
-
-	  /**
-	   * @param {import('../../types/dispatcher.d.ts').default.DispatchController} controller
-	   * @param {object} trailers
-	   */
-	  onResponseEnd (controller, trailers) {
-	    this.#primaryHandler.onResponseEnd?.(controller, trailers);
-	    this.#notifyWaitingHandlers();
-	    this.#onComplete?.();
-	  }
-
-	  /**
-	   * @param {import('../../types/dispatcher.d.ts').default.DispatchController} controller
-	   * @param {Error} err
-	   */
-	  onResponseError (controller, err) {
-	    this.#aborted = true;
-	    this.#primaryHandler.onResponseError?.(controller, err);
-	    this.#notifyWaitingHandlersError(err);
-	    this.#onComplete?.();
-	  }
-
-	  /**
-	   * Notify all waiting handlers with the buffered response
-	   */
-	  #notifyWaitingHandlers () {
-	    const body = Buffer.concat(this.#chunks);
-
-	    for (const handler of this.#waitingHandlers) {
-	      // Create a simple controller for each waiting handler
-	      const waitingController = {
-	        resume () {},
-	        pause () {},
-	        get paused () { return false },
-	        get aborted () { return false },
-	        get reason () { return null },
-	        abort () {}
-	      };
-
-	      try {
-	        handler.onRequestStart?.(waitingController, null);
-
-	        if (waitingController.aborted) {
-	          continue
-	        }
-
-	        handler.onResponseStart?.(
-	          waitingController,
-	          this.#statusCode,
-	          this.#headers,
-	          this.#statusMessage
-	        );
-
-	        if (waitingController.aborted) {
-	          continue
-	        }
-
-	        if (body.length > 0) {
-	          handler.onResponseData?.(waitingController, body);
-	        }
-
-	        handler.onResponseEnd?.(waitingController, {});
-	      } catch {
-	        // Ignore errors from waiting handlers
-	      }
-	    }
-
-	    this.#waitingHandlers = [];
-	    this.#chunks = [];
-	  }
-
-	  /**
-	   * Notify all waiting handlers of an error
-	   * @param {Error} err
-	   */
-	  #notifyWaitingHandlersError (err) {
-	    for (const handler of this.#waitingHandlers) {
-	      const waitingController = {
-	        resume () {},
-	        pause () {},
-	        get paused () { return false },
-	        get aborted () { return true },
-	        get reason () { return err },
-	        abort () {}
-	      };
-
-	      try {
-	        handler.onRequestStart?.(waitingController, null);
-	        handler.onResponseError?.(waitingController, err);
-	      } catch {
-	        // Ignore errors from waiting handlers
-	      }
-	    }
-
-	    this.#waitingHandlers = [];
-	    this.#chunks = [];
-	  }
-	}
-
-	deduplicationHandler = DeduplicationHandler;
-	return deduplicationHandler;
-}
-
-var deduplicate;
-var hasRequiredDeduplicate;
-
-function requireDeduplicate () {
-	if (hasRequiredDeduplicate) return deduplicate;
-	hasRequiredDeduplicate = 1;
-
-	const diagnosticsChannel = require$$0$6;
-	const util = requireUtil$5();
-	const DeduplicationHandler = requireDeduplicationHandler();
-	const { normalizeHeaders, makeCacheKey, makeDeduplicationKey } = requireCache$2();
-
-	const pendingRequestsChannel = diagnosticsChannel.channel('undici:request:pending-requests');
-
-	/**
-	 * @param {import('../../types/interceptors.d.ts').default.DeduplicateInterceptorOpts} [opts]
-	 * @returns {import('../../types/dispatcher.d.ts').default.DispatcherComposeInterceptor}
-	 */
-	deduplicate = (opts = {}) => {
-	  const {
-	    methods = ['GET'],
-	    skipHeaderNames = [],
-	    excludeHeaderNames = []
-	  } = opts;
-
-	  if (typeof opts !== 'object' || opts === null) {
-	    throw new TypeError(`expected type of opts to be an Object, got ${opts === null ? 'null' : typeof opts}`)
-	  }
-
-	  if (!Array.isArray(methods)) {
-	    throw new TypeError(`expected opts.methods to be an array, got ${typeof methods}`)
-	  }
-
-	  for (const method of methods) {
-	    if (!util.safeHTTPMethods.includes(method)) {
-	      throw new TypeError(`expected opts.methods to only contain safe HTTP methods, got ${method}`)
-	    }
-	  }
-
-	  if (!Array.isArray(skipHeaderNames)) {
-	    throw new TypeError(`expected opts.skipHeaderNames to be an array, got ${typeof skipHeaderNames}`)
-	  }
-
-	  if (!Array.isArray(excludeHeaderNames)) {
-	    throw new TypeError(`expected opts.excludeHeaderNames to be an array, got ${typeof excludeHeaderNames}`)
-	  }
-
-	  // Convert to lowercase Set for case-insensitive header matching
-	  const skipHeaderNamesSet = new Set(skipHeaderNames.map(name => name.toLowerCase()));
-
-	  // Convert to lowercase Set for case-insensitive header exclusion from deduplication key
-	  const excludeHeaderNamesSet = new Set(excludeHeaderNames.map(name => name.toLowerCase()));
-
-	  const safeMethodsToNotDeduplicate = util.safeHTTPMethods.filter(method => methods.includes(method) === false);
-
-	  /**
-	   * Map of pending requests for deduplication
-	   * @type {Map<string, DeduplicationHandler>}
-	   */
-	  const pendingRequests = new Map();
-
-	  return dispatch => {
-	    return (opts, handler) => {
-	      if (!opts.origin || safeMethodsToNotDeduplicate.includes(opts.method)) {
-	        return dispatch(opts, handler)
-	      }
-
-	      opts = {
-	        ...opts,
-	        headers: normalizeHeaders(opts)
-	      };
-
-	      // Skip deduplication if request contains any of the specified headers
-	      if (skipHeaderNamesSet.size > 0) {
-	        for (const headerName of Object.keys(opts.headers)) {
-	          if (skipHeaderNamesSet.has(headerName.toLowerCase())) {
-	            return dispatch(opts, handler)
-	          }
-	        }
-	      }
-
-	      const cacheKey = makeCacheKey(opts);
-	      const dedupeKey = makeDeduplicationKey(cacheKey, excludeHeaderNamesSet);
-
-	      // Check if there's already a pending request for this key
-	      const pendingHandler = pendingRequests.get(dedupeKey);
-	      if (pendingHandler) {
-	        // Add this handler to the waiting list
-	        pendingHandler.addWaitingHandler(handler);
-	        return true
-	      }
-
-	      // Create a new deduplication handler
-	      const deduplicationHandler = new DeduplicationHandler(
-	        handler,
-	        () => {
-	          // Clean up when request completes
-	          pendingRequests.delete(dedupeKey);
-	          if (pendingRequestsChannel.hasSubscribers) {
-	            pendingRequestsChannel.publish({ size: pendingRequests.size, key: dedupeKey, type: 'removed' });
-	          }
-	        }
-	      );
-
-	      // Register the pending request
-	      pendingRequests.set(dedupeKey, deduplicationHandler);
-	      if (pendingRequestsChannel.hasSubscribers) {
-	        pendingRequestsChannel.publish({ size: pendingRequests.size, key: dedupeKey, type: 'added' });
-	      }
-
-	      return dispatch(opts, deduplicationHandler)
-	    }
-	  }
-	};
-	return deduplicate;
-}
-
-var sqliteCacheStore;
-var hasRequiredSqliteCacheStore;
-
-function requireSqliteCacheStore () {
-	if (hasRequiredSqliteCacheStore) return sqliteCacheStore;
-	hasRequiredSqliteCacheStore = 1;
-
-	const { Writable } = require$$0$3;
-	const { assertCacheKey, assertCacheValue } = requireCache$2();
-
-	let DatabaseSync;
-
-	const VERSION = 3;
-
-	// 2gb
-	const MAX_ENTRY_SIZE = 2 * 1000 * 1000 * 1000;
-
-	/**
-	 * @typedef {import('../../types/cache-interceptor.d.ts').default.CacheStore} CacheStore
-	 * @implements {CacheStore}
-	 *
-	 * @typedef {{
-	 *  id: Readonly<number>,
-	 *  body?: Uint8Array
-	 *  statusCode: number
-	 *  statusMessage: string
-	 *  headers?: string
-	 *  vary?: string
-	 *  etag?: string
-	 *  cacheControlDirectives?: string
-	 *  cachedAt: number
-	 *  staleAt: number
-	 *  deleteAt: number
-	 * }} SqliteStoreValue
-	 */
-	sqliteCacheStore = class SqliteCacheStore {
-	  #maxEntrySize = MAX_ENTRY_SIZE
-	  #maxCount = Infinity
-
-	  /**
-	   * @type {import('node:sqlite').DatabaseSync}
-	   */
-	  #db
-
-	  /**
-	   * @type {import('node:sqlite').StatementSync}
-	   */
-	  #getValuesQuery
-
-	  /**
-	   * @type {import('node:sqlite').StatementSync}
-	   */
-	  #updateValueQuery
-
-	  /**
-	   * @type {import('node:sqlite').StatementSync}
-	   */
-	  #insertValueQuery
-
-	  /**
-	   * @type {import('node:sqlite').StatementSync}
-	   */
-	  #deleteExpiredValuesQuery
-
-	  /**
-	   * @type {import('node:sqlite').StatementSync}
-	   */
-	  #deleteByUrlQuery
-
-	  /**
-	   * @type {import('node:sqlite').StatementSync}
-	   */
-	  #countEntriesQuery
-
-	  /**
-	   * @type {import('node:sqlite').StatementSync | null}
-	   */
-	  #deleteOldValuesQuery
-
-	  /**
-	   * @param {import('../../types/cache-interceptor.d.ts').default.SqliteCacheStoreOpts | undefined} opts
-	   */
-	  constructor (opts) {
-	    if (opts) {
-	      if (typeof opts !== 'object') {
-	        throw new TypeError('SqliteCacheStore options must be an object')
-	      }
-
-	      if (opts.maxEntrySize !== undefined) {
-	        if (
-	          typeof opts.maxEntrySize !== 'number' ||
-	          !Number.isInteger(opts.maxEntrySize) ||
-	          opts.maxEntrySize < 0
-	        ) {
-	          throw new TypeError('SqliteCacheStore options.maxEntrySize must be a non-negative integer')
-	        }
-
-	        if (opts.maxEntrySize > MAX_ENTRY_SIZE) {
-	          throw new TypeError('SqliteCacheStore options.maxEntrySize must be less than 2gb')
-	        }
-
-	        this.#maxEntrySize = opts.maxEntrySize;
-	      }
-
-	      if (opts.maxCount !== undefined) {
-	        if (
-	          typeof opts.maxCount !== 'number' ||
-	          !Number.isInteger(opts.maxCount) ||
-	          opts.maxCount < 0
-	        ) {
-	          throw new TypeError('SqliteCacheStore options.maxCount must be a non-negative integer')
-	        }
-	        this.#maxCount = opts.maxCount;
-	      }
-	    }
-
-	    if (!DatabaseSync) {
-	      DatabaseSync = require$$1$2.DatabaseSync;
-	    }
-	    this.#db = new DatabaseSync(opts?.location ?? ':memory:');
-
-	    this.#db.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA synchronous = NORMAL;
-      PRAGMA temp_store = memory;
-      PRAGMA optimize;
-
-      CREATE TABLE IF NOT EXISTS cacheInterceptorV${VERSION} (
-        -- Data specific to us
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        url TEXT NOT NULL,
-        method TEXT NOT NULL,
-
-        -- Data returned to the interceptor
-        body BUF NULL,
-        deleteAt INTEGER NOT NULL,
-        statusCode INTEGER NOT NULL,
-        statusMessage TEXT NOT NULL,
-        headers TEXT NULL,
-        cacheControlDirectives TEXT NULL,
-        etag TEXT NULL,
-        vary TEXT NULL,
-        cachedAt INTEGER NOT NULL,
-        staleAt INTEGER NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_cacheInterceptorV${VERSION}_getValuesQuery ON cacheInterceptorV${VERSION}(url, method, deleteAt);
-      CREATE INDEX IF NOT EXISTS idx_cacheInterceptorV${VERSION}_deleteByUrlQuery ON cacheInterceptorV${VERSION}(deleteAt);
-    `);
-
-	    this.#getValuesQuery = this.#db.prepare(`
-      SELECT
-        id,
-        body,
-        deleteAt,
-        statusCode,
-        statusMessage,
-        headers,
-        etag,
-        cacheControlDirectives,
-        vary,
-        cachedAt,
-        staleAt
-      FROM cacheInterceptorV${VERSION}
-      WHERE
-        url = ?
-        AND method = ?
-      ORDER BY
-        deleteAt ASC
-    `);
-
-	    this.#updateValueQuery = this.#db.prepare(`
-      UPDATE cacheInterceptorV${VERSION} SET
-        body = ?,
-        deleteAt = ?,
-        statusCode = ?,
-        statusMessage = ?,
-        headers = ?,
-        etag = ?,
-        cacheControlDirectives = ?,
-        cachedAt = ?,
-        staleAt = ?
-      WHERE
-        id = ?
-    `);
-
-	    this.#insertValueQuery = this.#db.prepare(`
-      INSERT INTO cacheInterceptorV${VERSION} (
-        url,
-        method,
-        body,
-        deleteAt,
-        statusCode,
-        statusMessage,
-        headers,
-        etag,
-        cacheControlDirectives,
-        vary,
-        cachedAt,
-        staleAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-	    this.#deleteByUrlQuery = this.#db.prepare(
-	      `DELETE FROM cacheInterceptorV${VERSION} WHERE url = ?`
-	    );
-
-	    this.#countEntriesQuery = this.#db.prepare(
-	      `SELECT COUNT(*) AS total FROM cacheInterceptorV${VERSION}`
-	    );
-
-	    this.#deleteExpiredValuesQuery = this.#db.prepare(
-	      `DELETE FROM cacheInterceptorV${VERSION} WHERE deleteAt <= ?`
-	    );
-
-	    this.#deleteOldValuesQuery = this.#maxCount === Infinity
-	      ? null
-	      : this.#db.prepare(`
-        DELETE FROM cacheInterceptorV${VERSION}
-        WHERE id IN (
-          SELECT
-            id
-          FROM cacheInterceptorV${VERSION}
-          ORDER BY cachedAt DESC
-          LIMIT ?
-        )
-      `);
-	  }
-
-	  close () {
-	    this.#db.close();
-	  }
-
-	  /**
-	   * @param {import('../../types/cache-interceptor.d.ts').default.CacheKey} key
-	   * @returns {(import('../../types/cache-interceptor.d.ts').default.GetResult & { body?: Buffer }) | undefined}
-	   */
-	  get (key) {
-	    assertCacheKey(key);
-
-	    const value = this.#findValue(key);
-	    return value
-	      ? {
-	          body: value.body ? Buffer.from(value.body.buffer, value.body.byteOffset, value.body.byteLength) : undefined,
-	          statusCode: value.statusCode,
-	          statusMessage: value.statusMessage,
-	          headers: value.headers ? JSON.parse(value.headers) : undefined,
-	          etag: value.etag ? value.etag : undefined,
-	          vary: value.vary ? JSON.parse(value.vary) : undefined,
-	          cacheControlDirectives: value.cacheControlDirectives
-	            ? JSON.parse(value.cacheControlDirectives)
-	            : undefined,
-	          cachedAt: value.cachedAt,
-	          staleAt: value.staleAt,
-	          deleteAt: value.deleteAt
-	        }
-	      : undefined
-	  }
-
-	  /**
-	   * @param {import('../../types/cache-interceptor.d.ts').default.CacheKey} key
-	   * @param {import('../../types/cache-interceptor.d.ts').default.CacheValue & { body: null | Buffer | Array<Buffer>}} value
-	   */
-	  set (key, value) {
-	    assertCacheKey(key);
-
-	    const url = this.#makeValueUrl(key);
-	    const body = Array.isArray(value.body) ? Buffer.concat(value.body) : value.body;
-	    const size = body?.byteLength;
-
-	    if (size && size > this.#maxEntrySize) {
-	      return
-	    }
-
-	    const existingValue = this.#findValue(key, true);
-	    if (existingValue) {
-	      // Updating an existing response, let's overwrite it
-	      this.#updateValueQuery.run(
-	        body,
-	        value.deleteAt,
-	        value.statusCode,
-	        value.statusMessage,
-	        value.headers ? JSON.stringify(value.headers) : null,
-	        value.etag ? value.etag : null,
-	        value.cacheControlDirectives ? JSON.stringify(value.cacheControlDirectives) : null,
-	        value.cachedAt,
-	        value.staleAt,
-	        existingValue.id
-	      );
-	    } else {
-	      this.#prune();
-	      // New response, let's insert it
-	      this.#insertValueQuery.run(
-	        url,
-	        key.method,
-	        body,
-	        value.deleteAt,
-	        value.statusCode,
-	        value.statusMessage,
-	        value.headers ? JSON.stringify(value.headers) : null,
-	        value.etag ? value.etag : null,
-	        value.cacheControlDirectives ? JSON.stringify(value.cacheControlDirectives) : null,
-	        value.vary ? JSON.stringify(value.vary) : null,
-	        value.cachedAt,
-	        value.staleAt
-	      );
-	    }
-	  }
-
-	  /**
-	   * @param {import('../../types/cache-interceptor.d.ts').default.CacheKey} key
-	   * @param {import('../../types/cache-interceptor.d.ts').default.CacheValue} value
-	   * @returns {Writable | undefined}
-	   */
-	  createWriteStream (key, value) {
-	    assertCacheKey(key);
-	    assertCacheValue(value);
-
-	    let size = 0;
-	    /**
-	     * @type {Buffer[] | null}
-	     */
-	    const body = [];
-	    const store = this;
-
-	    return new Writable({
-	      decodeStrings: true,
-	      write (chunk, encoding, callback) {
-	        size += chunk.byteLength;
-
-	        if (size < store.#maxEntrySize) {
-	          body.push(chunk);
-	        } else {
-	          this.destroy();
-	        }
-
-	        callback();
-	      },
-	      final (callback) {
-	        store.set(key, { ...value, body });
-	        callback();
-	      }
-	    })
-	  }
-
-	  /**
-	   * @param {import('../../types/cache-interceptor.d.ts').default.CacheKey} key
-	   */
-	  delete (key) {
-	    if (typeof key !== 'object') {
-	      throw new TypeError(`expected key to be object, got ${typeof key}`)
-	    }
-
-	    this.#deleteByUrlQuery.run(this.#makeValueUrl(key));
-	  }
-
-	  #prune () {
-	    if (Number.isFinite(this.#maxCount) && this.size <= this.#maxCount) {
-	      return 0
-	    }
-
-	    {
-	      const removed = this.#deleteExpiredValuesQuery.run(Date.now()).changes;
-	      if (removed) {
-	        return removed
-	      }
-	    }
-
-	    {
-	      const removed = this.#deleteOldValuesQuery?.run(Math.max(Math.floor(this.#maxCount * 0.1), 1)).changes;
-	      if (removed) {
-	        return removed
-	      }
-	    }
-
-	    return 0
-	  }
-
-	  /**
-	   * Counts the number of rows in the cache
-	   * @returns {Number}
-	   */
-	  get size () {
-	    const { total } = this.#countEntriesQuery.get();
-	    return total
-	  }
-
-	  /**
-	   * @param {import('../../types/cache-interceptor.d.ts').default.CacheKey} key
-	   * @returns {string}
-	   */
-	  #makeValueUrl (key) {
-	    return `${key.origin}/${key.path}`
-	  }
-
-	  /**
-	   * @param {import('../../types/cache-interceptor.d.ts').default.CacheKey} key
-	   * @param {boolean} [canBeExpired=false]
-	   * @returns {SqliteStoreValue | undefined}
-	   */
-	  #findValue (key, canBeExpired = false) {
-	    const url = this.#makeValueUrl(key);
-	    const { headers, method } = key;
-
-	    /**
-	     * @type {SqliteStoreValue[]}
-	     */
-	    const values = this.#getValuesQuery.all(url, method);
-
-	    if (values.length === 0) {
-	      return undefined
-	    }
-
-	    const now = Date.now();
-	    for (const value of values) {
-	      if (now >= value.deleteAt && !canBeExpired) {
-	        return undefined
-	      }
-
-	      let matches = true;
-
-	      if (value.vary) {
-	        const vary = JSON.parse(value.vary);
-
-	        for (const header in vary) {
-	          if (!headerValueEquals(headers[header], vary[header])) {
-	            matches = false;
-	            break
-	          }
-	        }
-	      }
-
-	      if (matches) {
-	        return value
-	      }
-	    }
-
-	    return undefined
-	  }
-	};
-
-	/**
-	 * @param {string|string[]|null|undefined} lhs
-	 * @param {string|string[]|null|undefined} rhs
-	 * @returns {boolean}
-	 */
-	function headerValueEquals (lhs, rhs) {
-	  if (lhs == null && rhs == null) {
-	    return true
-	  }
-
-	  if ((lhs == null && rhs != null) ||
-	      (lhs != null && rhs == null)) {
-	    return false
-	  }
-
-	  if (Array.isArray(lhs) && Array.isArray(rhs)) {
-	    if (lhs.length !== rhs.length) {
-	      return false
-	    }
-
-	    return lhs.every((x, i) => x === rhs[i])
-	  }
-
-	  return lhs === rhs
-	}
-	return sqliteCacheStore;
 }
 
 var headers;
@@ -24761,7 +23144,9 @@ function requireResponse () {
 	  isValidReasonPhrase,
 	  isCancelled,
 	  isAborted,
+	  serializeJavascriptValueToJSONString,
 	  isErrorLike,
+	  isomorphicEncode,
 	  environmentSettingsObject: relevantRealm
 	} = requireUtil$4();
 	const {
@@ -24772,7 +23157,6 @@ function requireResponse () {
 	const { URLSerializer } = requireDataUrl();
 	const { kConstruct } = requireSymbols();
 	const assert = require$$0$2;
-	const { isomorphicEncode, serializeJavascriptValueToJSONString } = requireInfra();
 
 	const textEncoder = new TextEncoder('utf-8');
 
@@ -25205,7 +23589,7 @@ function requireResponse () {
 
 	    return makeFilteredResponse(response, {
 	      type: 'opaque',
-	      urlList: [],
+	      urlList: Object.freeze([]),
 	      status: 0,
 	      statusText: '',
 	      body: null
@@ -25307,8 +23691,7 @@ function requireResponse () {
 	  setHeadersList(headers, innerResponse.headersList);
 	  setHeadersGuard(headers, guard);
 
-	  // Note: If innerResponse's urlList contains a URL, it is a fetch response.
-	  if (innerResponse.urlList.length !== 0 && innerResponse.body?.stream) {
+	  if (innerResponse.body?.stream) {
 	    // If the target (response) is reclaimed, the cleanup callback may be called at some point with
 	    // the held value provided for it (innerResponse.body.stream). The held value can be any value:
 	    // a primitive or an object, even undefined. If the held value is an object, the registry keeps
@@ -25395,11 +23778,11 @@ function requireResponse () {
 
 /* globals AbortController */
 
-var request$1;
+var request$2;
 var hasRequiredRequest;
 
 function requireRequest () {
-	if (hasRequiredRequest) return request$1;
+	if (hasRequiredRequest) return request$2;
 	hasRequiredRequest = 1;
 
 	const { extractBody, mixinBody, cloneBody, bodyUnusable } = requireBody();
@@ -26318,8 +24701,6 @@ function requireRequest () {
 	    preventNoCacheCacheControlHeaderModification: init.preventNoCacheCacheControlHeaderModification ?? false,
 	    done: init.done ?? false,
 	    timingAllowFailed: init.timingAllowFailed ?? false,
-	    useURLCredentials: init.useURLCredentials ?? undefined,
-	    traversableForUserPrompts: init.traversableForUserPrompts ?? 'client',
 	    urlList: init.urlList,
 	    url: init.urlList[0],
 	    headersList: init.headersList
@@ -26496,16 +24877,10 @@ function requireRequest () {
 	  {
 	    key: 'dispatcher', // undici specific option
 	    converter: webidl.converters.any
-	  },
-	  {
-	    key: 'priority',
-	    converter: webidl.converters.DOMString,
-	    allowedValues: ['high', 'low', 'auto'],
-	    defaultValue: () => 'auto'
 	  }
 	]);
 
-	request$1 = {
+	request$2 = {
 	  Request,
 	  makeRequest,
 	  fromInnerRequest,
@@ -26513,7 +24888,7 @@ function requireRequest () {
 	  getRequestDispatcher,
 	  getRequestState
 	};
-	return request$1;
+	return request$2;
 }
 
 var subresourceIntegrity;
@@ -26524,7 +24899,6 @@ function requireSubresourceIntegrity () {
 	hasRequiredSubresourceIntegrity = 1;
 
 	const assert = require$$0$2;
-	const { runtimeFeatures } = requireRuntimeFeatures();
 
 	/**
 	 * @typedef {object} Metadata
@@ -26553,11 +24927,10 @@ function requireSubresourceIntegrity () {
 	const validSRIHashAlgorithmTokenSet = new Map([['sha256', 0], ['sha384', 1], ['sha512', 2]]);
 
 	// https://nodejs.org/api/crypto.html#determining-if-crypto-support-is-unavailable
-	/** @type {import('node:crypto')} */
+	/** @type {import('crypto')} */
 	let crypto;
-
-	if (runtimeFeatures.has('crypto')) {
-	  crypto = require$$2$3;
+	try {
+	  crypto = require('node:crypto');
 	  const cryptoHashes = crypto.getHashes();
 
 	  // If no hashes are available, we cannot support SRI.
@@ -26571,7 +24944,8 @@ function requireSubresourceIntegrity () {
 	      validSRIHashAlgorithmTokenSet.delete(algorithm);
 	    }
 	  }
-	} else {
+	  /* c8 ignore next 4 */
+	} catch {
 	  // If crypto is not available, we cannot support SRI.
 	  validSRIHashAlgorithmTokenSet.clear();
 	}
@@ -26605,7 +24979,7 @@ function requireSubresourceIntegrity () {
 	 *
 	 * @see https://w3c.github.io/webappsec-subresource-integrity/#does-response-match-metadatalist
 	 */
-	const bytesMatch = runtimeFeatures.has('crypto') === false || validSRIHashAlgorithmTokenSet.size === 0
+	const bytesMatch = crypto === undefined || validSRIHashAlgorithmTokenSet.size === 0
 	  // If node is not built with OpenSSL support, we cannot check
 	  // a request's integrity, so allow it by default (the spec will
 	  // allow requests if an invalid hash is given, as precedence).
@@ -26848,7 +25222,7 @@ function requireFetch () {
 	} = requireResponse();
 	const { HeadersList } = requireHeaders();
 	const { Request, cloneRequest, getRequestDispatcher, getRequestState } = requireRequest();
-	const zlib = require$$3$1;
+	const zlib = require$$0$8;
 	const {
 	  makePolicyContainer,
 	  clonePolicyContainer,
@@ -26871,6 +25245,7 @@ function requireFetch () {
 	  isErrorLike,
 	  fullyReadBody,
 	  readableStreamClose,
+	  isomorphicEncode,
 	  urlIsLocal,
 	  urlIsHttpHttpsScheme,
 	  urlHasHttpsScheme,
@@ -26878,10 +25253,7 @@ function requireFetch () {
 	  simpleRangeHeaderValue,
 	  buildContentRange,
 	  createInflate,
-	  extractMimeType,
-	  hasAuthenticationEntry,
-	  includesCredentials,
-	  isTraversableNavigable
+	  extractMimeType
 	} = requireUtil$4();
 	const assert = require$$0$2;
 	const { safelyExtractBody, extractBody } = requireBody();
@@ -26901,11 +25273,8 @@ function requireFetch () {
 	const { STATUS_CODES } = require$$2$1;
 	const { bytesMatch } = requireSubresourceIntegrity();
 	const { createDeferredPromise } = requirePromise();
-	const { isomorphicEncode } = requireInfra();
-	const { runtimeFeatures } = requireRuntimeFeatures();
 
-	// Node.js v23.8.0+ and v22.15.0+ supports Zstandard
-	const hasZstd = runtimeFeatures.has('zstd');
+	const hasZstd = typeof zlib.createZstdDecompress === 'function';
 
 	const GET_OR_HEAD = ['GET', 'HEAD'];
 
@@ -27724,7 +26093,7 @@ function requireFetch () {
 
 	        // 8. Let slicedBlob be the result of invoking slice blob given blob, rangeStart,
 	        //    rangeEnd + 1, and type.
-	        const slicedBlob = blob.slice(rangeStart, rangeEnd + 1, type);
+	        const slicedBlob = blob.slice(rangeStart, rangeEnd, type);
 
 	        // 9. Let slicedBodyWithType be the result of safely extracting slicedBlob.
 	        // Note: same reason as mentioned above as to why we use extractBody
@@ -28346,39 +26715,6 @@ function requireFetch () {
 
 	  httpRequest.headersList.delete('host', true);
 
-	  //    21. If includeCredentials is true, then:
-	  if (includeCredentials) {
-	    // 1. If the user agent is not configured to block cookies for httpRequest
-	    // (see section 7 of [COOKIES]), then:
-	    // TODO: credentials
-
-	    // 2. If httpRequest’s header list does not contain `Authorization`, then:
-	    if (!httpRequest.headersList.contains('authorization', true)) {
-	      // 1. Let authorizationValue be null.
-	      let authorizationValue = null;
-
-	      // 2. If there’s an authentication entry for httpRequest and either
-	      //    httpRequest’s use-URL-credentials flag is unset or httpRequest’s
-	      //    current URL does not include credentials, then set
-	      //    authorizationValue to authentication entry.
-	      if (hasAuthenticationEntry(httpRequest) && (
-	        httpRequest.useURLCredentials === undefined || !includesCredentials(requestCurrentURL(httpRequest))
-	      )) ; else if (includesCredentials(requestCurrentURL(httpRequest)) && isAuthenticationFetch) {
-	        // 3. Otherwise, if httpRequest’s current URL does include credentials
-	        //    and isAuthenticationFetch is true, set authorizationValue to
-	        //    httpRequest’s current URL, converted to an `Authorization` value
-	        const { username, password } = requestCurrentURL(httpRequest);
-	        authorizationValue = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
-	      }
-
-	      // 4. If authorizationValue is non-null, then append (`Authorization`,
-	      //    authorizationValue) to httpRequest’s header list.
-	      if (authorizationValue !== null) {
-	        httpRequest.headersList.append('Authorization', authorizationValue, false);
-	      }
-	    }
-	  }
-
 	  //    21. If there’s a proxy-authentication entry, use it as appropriate.
 	  //    TODO: proxy-authentication
 
@@ -28448,48 +26784,10 @@ function requireFetch () {
 	  // 13. Set response’s request-includes-credentials to includeCredentials.
 	  response.requestIncludesCredentials = includeCredentials;
 
-	  // 14. If response’s status is 401, httpRequest’s response tainting is not "cors",
-	  //     includeCredentials is true, and request’s traversable for user prompts is
-	  //     a traversable navigable:
-	  if (response.status === 401 && httpRequest.responseTainting !== 'cors' && includeCredentials && isTraversableNavigable(request.traversableForUserPrompts)) {
-	    // 2. If request’s body is non-null, then:
-	    if (request.body != null) {
-	      // 1. If request’s body’s source is null, then return a network error.
-	      if (request.body.source == null) {
-	        return makeNetworkError('expected non-null body source')
-	      }
-
-	      // 2. Set request’s body to the body of the result of safely extracting
-	      //    request’s body’s source.
-	      request.body = safelyExtractBody(request.body.source)[0];
-	    }
-
-	    // 3. If request’s use-URL-credentials flag is unset or isAuthenticationFetch is
-	    //    true, then:
-	    if (request.useURLCredentials === undefined || isAuthenticationFetch) {
-	      // 1. If fetchParams is canceled, then return the appropriate network error
-	      //    for fetchParams.
-	      if (isCancelled(fetchParams)) {
-	        return makeAppropriateNetworkError(fetchParams)
-	      }
-
-	      // 2. Let username and password be the result of prompting the end user for a
-	      //    username and password, respectively, in request’s traversable for user prompts.
-	      // TODO
-
-	      // 3. Set the username given request’s current URL and username.
-	      // requestCurrentURL(request).username = TODO
-
-	      // 4. Set the password given request’s current URL and password.
-	      // requestCurrentURL(request).password = TODO
-	    }
-
-	    // 4. Set response to the result of running HTTP-network-or-cache fetch given
-	    //    fetchParams and true.
-	    fetchParams.controller.connection.destroy();
-
-	    response = await httpNetworkOrCacheFetch(fetchParams, true);
-	  }
+	  // 14. If response’s status is 401, httpRequest’s response tainting is not
+	  // "cors", includeCredentials is true, and request’s window is an environment
+	  // settings object, then:
+	  // TODO
 
 	  // 15. If response’s status is 407, then:
 	  if (response.status === 407) {
@@ -28977,15 +27275,6 @@ function requireFetch () {
 	            // "All content-coding values are case-insensitive..."
 	            /** @type {string[]} */
 	            const codings = contentEncoding ? contentEncoding.toLowerCase().split(',') : [];
-
-	            // Limit the number of content-encodings to prevent resource exhaustion.
-	            // CVE fix similar to urllib3 (GHSA-gm62-xv2j-4w53) and curl (CVE-2022-32206).
-	            const maxContentEncodings = 5;
-	            if (codings.length > maxContentEncodings) {
-	              reject(new Error(`too many content-encodings in response: ${codings.length}, maximum allowed is ${maxContentEncodings}`));
-	              return true
-	            }
-
 	            for (let i = codings.length - 1; i >= 0; --i) {
 	              const coding = codings[i].trim();
 	              // https://www.rfc-editor.org/rfc/rfc9112.html#section-7.2
@@ -29009,6 +27298,7 @@ function requireFetch () {
 	                  finishFlush: zlib.constants.BROTLI_OPERATION_FLUSH
 	                }));
 	              } else if (coding === 'zstd' && hasZstd) {
+	              // Node.js v23.8.0+ and v22.15.0+ supports Zstandard
 	                decoders.push(zlib.createZstdDecompress({
 	                  flush: zlib.constants.ZSTD_e_continue,
 	                  finishFlush: zlib.constants.ZSTD_e_end
@@ -29084,10 +27374,8 @@ function requireFetch () {
 	        },
 
 	        onUpgrade (status, rawHeaders, socket) {
-	          // We need to support 200 for websocket over h2 as per RFC-8441
-	          // Absence of session means H1
-	          if ((socket.session != null && status !== 200) || (socket.session == null && status !== 101)) {
-	            return false
+	          if (status !== 101) {
+	            return
 	          }
 
 	          const headersList = new HeadersList();
@@ -29973,9 +28261,9 @@ function requireCache () {
 	    // 5.5.2
 	    for (const response of responses) {
 	      // 5.5.2.1
-	      const responseObject = fromInnerResponse(cloneResponse(response), 'immutable');
+	      const responseObject = fromInnerResponse(response, 'immutable');
 
-	      responseList.push(responseObject);
+	      responseList.push(responseObject.clone());
 
 	      if (responseList.length >= maxResponses) {
 	        break
@@ -30514,16 +28802,16 @@ function requireUtil$2 () {
 	return util$2;
 }
 
-var parse$1;
+var parse$2;
 var hasRequiredParse;
 
 function requireParse () {
-	if (hasRequiredParse) return parse$1;
+	if (hasRequiredParse) return parse$2;
 	hasRequiredParse = 1;
 
-	const { collectASequenceOfCodePointsFast } = requireInfra();
 	const { maxNameValuePairSize, maxAttributeValueSize } = requireConstants$1();
 	const { isCTLExcludingHtab } = requireUtil$2();
+	const { collectASequenceOfCodePointsFast } = requireDataUrl();
 	const assert = require$$0$2;
 	const { unescape: qsUnescape } = require$$5;
 
@@ -30837,11 +29125,11 @@ function requireParse () {
 	  return parseUnparsedAttributes(unparsedAttributes, cookieAttributeList)
 	}
 
-	parse$1 = {
+	parse$2 = {
 	  parseSetCookie,
 	  parseUnparsedAttributes
 	};
-	return parse$1;
+	return parse$2;
 }
 
 var cookies;
@@ -31533,8 +29821,7 @@ function requireUtil$1 () {
 
 	const { states, opcodes } = requireConstants();
 	const { isUtf8 } = require$$0$7;
-	const { removeHTTPWhitespace } = requireDataUrl();
-	const { collectASequenceOfCodePointsFast } = requireInfra();
+	const { collectASequenceOfCodePointsFast, removeHTTPWhitespace } = requireDataUrl();
 
 	/**
 	 * @param {number} readyState
@@ -31878,28 +30165,34 @@ function requireFrame () {
 	if (hasRequiredFrame) return frame;
 	hasRequiredFrame = 1;
 
-	const { runtimeFeatures } = requireRuntimeFeatures();
 	const { maxUnsigned16Bit, opcodes } = requireConstants();
 
 	const BUFFER_SIZE = 8 * 1024;
 
+	/** @type {import('crypto')} */
+	let crypto;
 	let buffer = null;
 	let bufIdx = BUFFER_SIZE;
 
-	const randomFillSync = runtimeFeatures.has('crypto')
-	  ? require$$2$3.randomFillSync
-	  // not full compatibility, but minimum.
-	  : function randomFillSync (buffer, _offset, _size) {
-	    for (let i = 0; i < buffer.length; ++i) {
-	      buffer[i] = Math.random() * 255 | 0;
+	try {
+	  crypto = require('node:crypto');
+	/* c8 ignore next 3 */
+	} catch {
+	  crypto = {
+	    // not full compatibility, but minimum.
+	    randomFillSync: function randomFillSync (buffer, _offset, _size) {
+	      for (let i = 0; i < buffer.length; ++i) {
+	        buffer[i] = Math.random() * 255 | 0;
+	      }
+	      return buffer
 	    }
-	    return buffer
 	  };
+	}
 
 	function generateMask () {
 	  if (bufIdx === BUFFER_SIZE) {
 	    bufIdx = 0;
-	    randomFillSync((buffer ??= Buffer.allocUnsafeSlow(BUFFER_SIZE)), 0, BUFFER_SIZE);
+	    crypto.randomFillSync((buffer ??= Buffer.allocUnsafeSlow(BUFFER_SIZE)), 0, BUFFER_SIZE);
 	  }
 	  return [buffer[bufIdx++], buffer[bufIdx++], buffer[bufIdx++], buffer[bufIdx++]]
 	}
@@ -32020,20 +30313,22 @@ function requireConnection () {
 	hasRequiredConnection = 1;
 
 	const { uid, states, sentCloseFrameState, emptyBuffer, opcodes } = requireConstants();
-	const { parseExtensions, isClosed, isClosing, isEstablished, isConnecting, validateCloseCodeAndReason } = requireUtil$1();
+	const { parseExtensions, isClosed, isClosing, isEstablished, validateCloseCodeAndReason } = requireUtil$1();
 	const { makeRequest } = requireRequest();
 	const { fetching } = requireFetch();
 	const { Headers, getHeadersList } = requireHeaders();
 	const { getDecodeSplit } = requireUtil$4();
 	const { WebsocketFrameSend } = requireFrame();
 	const assert = require$$0$2;
-	const { runtimeFeatures } = requireRuntimeFeatures();
 
-	const crypto = runtimeFeatures.has('crypto')
-	  ? require$$2$3
-	  : null;
+	/** @type {import('crypto')} */
+	let crypto;
+	try {
+	  crypto = require('node:crypto');
+	/* c8 ignore next 3 */
+	} catch {
 
-	let warningEmitted = false;
+	}
 
 	/**
 	 * @see https://websockets.spec.whatwg.org/#concept-websocket-establish
@@ -32052,7 +30347,7 @@ function requireConnection () {
 	  // 2. Let request be a new request, whose URL is requestURL, client is client,
 	  //    service-workers mode is "none", referrer is "no-referrer", mode is
 	  //    "websocket", credentials mode is "include", cache mode is "no-store" ,
-	  //    redirect mode is "error", and use-URL-credentials flag is set.
+	  //    and redirect mode is "error".
 	  const request = makeRequest({
 	    urlList: [requestURL],
 	    client,
@@ -32061,8 +30356,7 @@ function requireConnection () {
 	    mode: 'websocket',
 	    credentials: 'include',
 	    cache: 'no-store',
-	    redirect: 'error',
-	    useURLCredentials: true
+	    redirect: 'error'
 	  });
 
 	  // Note: undici extension, allow setting custom headers.
@@ -32113,27 +30407,17 @@ function requireConnection () {
 	    useParallelQueue: true,
 	    dispatcher: options.dispatcher,
 	    processResponse (response) {
-	      // 1. If response is a network error or its status is not 101,
-	      //    fail the WebSocket connection.
-	      // if (response.type === 'error' || ((response.socket?.session != null && response.status !== 200) && response.status !== 101)) {
-	      if (response.type === 'error' || response.status !== 101) {
-	        // The presence of a session property on the socket indicates HTTP2
-	        // HTTP1
-	        if (response.socket?.session == null) {
-	          failWebsocketConnection(handler, 1002, 'Received network error or non-101 status code.', response.error);
-	          return
-	        }
-
-	        // HTTP2
-	        if (response.status !== 200) {
-	          failWebsocketConnection(handler, 1002, 'Received network error or non-200 status code.', response.error);
-	          return
-	        }
+	      if (response.type === 'error') {
+	        // If the WebSocket connection could not be established, it is also said
+	        // that _The WebSocket Connection is Closed_, but not _cleanly_.
+	        handler.readyState = states.CLOSED;
 	      }
 
-	      if (warningEmitted === false && response.socket?.session != null) {
-	        process.emitWarning('WebSocket over HTTP2 is experimental, and subject to change.', 'ExperimentalWarning');
-	        warningEmitted = true;
+	      // 1. If response is a network error or its status is not 101,
+	      //    fail the WebSocket connection.
+	      if (response.type === 'error' || response.status !== 101) {
+	        failWebsocketConnection(handler, 1002, 'Received network error or non-101 status code.', response.error);
+	        return
 	      }
 
 	      // 2. If protocols is not the empty list and extracting header
@@ -32155,8 +30439,7 @@ function requireConnection () {
 	      //    header field contains a value that is not an ASCII case-
 	      //    insensitive match for the value "websocket", the client MUST
 	      //    _Fail the WebSocket Connection_.
-	      //    For H2, no upgrade header is expected.
-	      if (response.socket.session == null && response.headersList.get('Upgrade')?.toLowerCase() !== 'websocket') {
+	      if (response.headersList.get('Upgrade')?.toLowerCase() !== 'websocket') {
 	        failWebsocketConnection(handler, 1002, 'Server did not set Upgrade header to "websocket".');
 	        return
 	      }
@@ -32165,8 +30448,7 @@ function requireConnection () {
 	      //    |Connection| header field doesn't contain a token that is an
 	      //    ASCII case-insensitive match for the value "Upgrade", the client
 	      //    MUST _Fail the WebSocket Connection_.
-	      //    For H2, no connection header is expected.
-	      if (response.socket.session == null && response.headersList.get('Connection')?.toLowerCase() !== 'upgrade') {
+	      if (response.headersList.get('Connection')?.toLowerCase() !== 'upgrade') {
 	        failWebsocketConnection(handler, 1002, 'Server did not set Connection header to "upgrade".');
 	        return
 	      }
@@ -32179,7 +30461,7 @@ function requireConnection () {
 	      //    trailing whitespace, the client MUST _Fail the WebSocket
 	      //    Connection_.
 	      const secWSAccept = response.headersList.get('Sec-WebSocket-Accept');
-	      const digest = crypto.hash('sha1', keyValue + uid, 'base64');
+	      const digest = crypto.createHash('sha1').update(keyValue + uid).digest('base64');
 	      if (secWSAccept !== digest) {
 	        failWebsocketConnection(handler, 1002, 'Incorrect hash received in Sec-WebSocket-Accept header.');
 	        return
@@ -32331,10 +30613,10 @@ function requireConnection () {
 
 	  handler.controller.abort();
 
-	  if (isConnecting(handler.readyState)) {
+	  if (!handler.socket) {
 	    // If the connection was not established, we must still emit an 'error' and 'close' events
 	    handler.onSocketClose();
-	  } else if (handler.socket?.destroyed === false) {
+	  } else if (handler.socket.destroyed === false) {
 	    handler.socket.destroy();
 	  }
 	}
@@ -32354,7 +30636,7 @@ function requirePermessageDeflate () {
 	if (hasRequiredPermessageDeflate) return permessageDeflate;
 	hasRequiredPermessageDeflate = 1;
 
-	const { createInflateRaw, Z_DEFAULT_WINDOWBITS } = require$$3$1;
+	const { createInflateRaw, Z_DEFAULT_WINDOWBITS } = require$$0$8;
 	const { isValidClientWindowBits } = requireUtil$1();
 
 	const tail = Buffer.from([0x00, 0x00, 0xff, 0xff]);
@@ -33870,8 +32152,8 @@ function requireWebsocketstream () {
 	const { WebsocketFrameSend } = requireFrame();
 	const { ByteParser } = requireReceiver();
 	const { WebSocketError, createUnvalidatedWebSocketError } = requireWebsocketerror();
+	const { utf8DecodeBytes } = requireUtil$4();
 	const { kEnumerableProperty } = requireUtil$5();
-	const { utf8DecodeBytes } = requireEncoding();
 
 	let emittedExperimentalWarning = false;
 
@@ -35324,7 +33606,6 @@ function requireUndici () {
 		const Dispatcher = requireDispatcher();
 		const Pool = requirePool();
 		const BalancedPool = requireBalancedPool();
-		const RoundRobinPool = requireRoundRobinPool();
 		const Agent = requireAgent();
 		const ProxyAgent = requireProxyAgent();
 		const EnvHttpProxyAgent = requireEnvHttpProxyAgent();
@@ -35352,7 +33633,6 @@ function requireUndici () {
 		module.exports.Client = Client;
 		module.exports.Pool = Pool;
 		module.exports.BalancedPool = BalancedPool;
-		module.exports.RoundRobinPool = RoundRobinPool;
 		module.exports.Agent = Agent;
 		module.exports.ProxyAgent = ProxyAgent;
 		module.exports.EnvHttpProxyAgent = EnvHttpProxyAgent;
@@ -35369,15 +33649,14 @@ function requireUndici () {
 		  dump: requireDump(),
 		  dns: requireDns(),
 		  cache: requireCache$1(),
-		  decompress: requireDecompress(),
-		  deduplicate: requireDeduplicate()
+		  decompress: requireDecompress()
 		};
 
 		module.exports.cacheStores = {
 		  MemoryCacheStore: requireMemoryCacheStore()
 		};
 
-		const SqliteCacheStore = requireSqliteCacheStore();
+		const SqliteCacheStore = require$$31;
 		module.exports.cacheStores.SqliteCacheStore = SqliteCacheStore;
 
 		module.exports.buildConnector = buildConnector;
@@ -37430,7 +35709,7 @@ function requireToolrunner () {
 	toolrunner.argStringToArray = argStringToArray;
 	const os = __importStar(require$$0);
 	const events = __importStar(require$$4);
-	const child = __importStar(require$$2$5);
+	const child = __importStar(require$$2$3);
 	const path = __importStar(require$$1$7);
 	const io = __importStar(requireIo());
 	const ioUtil = __importStar(requireIoUtil());
@@ -38060,7 +36339,7 @@ function requireExec () {
 	Object.defineProperty(exec, "__esModule", { value: true });
 	exec.exec = exec$1;
 	exec.getExecOutput = getExecOutput;
-	const string_decoder_1 = require$$0$9;
+	const string_decoder_1 = require$$0$a;
 	const tr = __importStar(requireToolrunner());
 	/**
 	 * Exec a command.
@@ -38781,6 +37060,758 @@ var Hook = { Collection };
 // pkg/dist-src/defaults.js
 
 // pkg/dist-src/version.js
+var VERSION$9 = "0.0.0-development";
+
+// pkg/dist-src/defaults.js
+var userAgent$1 = `octokit-endpoint.js/${VERSION$9} ${getUserAgent()}`;
+var DEFAULTS$1 = {
+  method: "GET",
+  baseUrl: "https://api.github.com",
+  headers: {
+    accept: "application/vnd.github.v3+json",
+    "user-agent": userAgent$1
+  },
+  mediaType: {
+    format: ""
+  }
+};
+
+// pkg/dist-src/util/lowercase-keys.js
+function lowercaseKeys$1(object) {
+  if (!object) {
+    return {};
+  }
+  return Object.keys(object).reduce((newObj, key) => {
+    newObj[key.toLowerCase()] = object[key];
+    return newObj;
+  }, {});
+}
+
+// pkg/dist-src/util/is-plain-object.js
+function isPlainObject$3(value) {
+  if (typeof value !== "object" || value === null) return false;
+  if (Object.prototype.toString.call(value) !== "[object Object]") return false;
+  const proto = Object.getPrototypeOf(value);
+  if (proto === null) return true;
+  const Ctor = Object.prototype.hasOwnProperty.call(proto, "constructor") && proto.constructor;
+  return typeof Ctor === "function" && Ctor instanceof Ctor && Function.prototype.call(Ctor) === Function.prototype.call(value);
+}
+
+// pkg/dist-src/util/merge-deep.js
+function mergeDeep$1(defaults, options) {
+  const result = Object.assign({}, defaults);
+  Object.keys(options).forEach((key) => {
+    if (isPlainObject$3(options[key])) {
+      if (!(key in defaults)) Object.assign(result, { [key]: options[key] });
+      else result[key] = mergeDeep$1(defaults[key], options[key]);
+    } else {
+      Object.assign(result, { [key]: options[key] });
+    }
+  });
+  return result;
+}
+
+// pkg/dist-src/util/remove-undefined-properties.js
+function removeUndefinedProperties$1(obj) {
+  for (const key in obj) {
+    if (obj[key] === void 0) {
+      delete obj[key];
+    }
+  }
+  return obj;
+}
+
+// pkg/dist-src/merge.js
+function merge$1(defaults, route, options) {
+  if (typeof route === "string") {
+    let [method, url] = route.split(" ");
+    options = Object.assign(url ? { method, url } : { url: method }, options);
+  } else {
+    options = Object.assign({}, route);
+  }
+  options.headers = lowercaseKeys$1(options.headers);
+  removeUndefinedProperties$1(options);
+  removeUndefinedProperties$1(options.headers);
+  const mergedOptions = mergeDeep$1(defaults || {}, options);
+  if (options.url === "/graphql") {
+    if (defaults && defaults.mediaType.previews?.length) {
+      mergedOptions.mediaType.previews = defaults.mediaType.previews.filter(
+        (preview) => !mergedOptions.mediaType.previews.includes(preview)
+      ).concat(mergedOptions.mediaType.previews);
+    }
+    mergedOptions.mediaType.previews = (mergedOptions.mediaType.previews || []).map((preview) => preview.replace(/-preview/, ""));
+  }
+  return mergedOptions;
+}
+
+// pkg/dist-src/util/add-query-parameters.js
+function addQueryParameters$1(url, parameters) {
+  const separator = /\?/.test(url) ? "&" : "?";
+  const names = Object.keys(parameters);
+  if (names.length === 0) {
+    return url;
+  }
+  return url + separator + names.map((name) => {
+    if (name === "q") {
+      return "q=" + parameters.q.split("+").map(encodeURIComponent).join("+");
+    }
+    return `${name}=${encodeURIComponent(parameters[name])}`;
+  }).join("&");
+}
+
+// pkg/dist-src/util/extract-url-variable-names.js
+var urlVariableRegex$1 = /\{[^{}}]+\}/g;
+function removeNonChars$1(variableName) {
+  return variableName.replace(/(?:^\W+)|(?:(?<!\W)\W+$)/g, "").split(/,/);
+}
+function extractUrlVariableNames$1(url) {
+  const matches = url.match(urlVariableRegex$1);
+  if (!matches) {
+    return [];
+  }
+  return matches.map(removeNonChars$1).reduce((a, b) => a.concat(b), []);
+}
+
+// pkg/dist-src/util/omit.js
+function omit$1(object, keysToOmit) {
+  const result = { __proto__: null };
+  for (const key of Object.keys(object)) {
+    if (keysToOmit.indexOf(key) === -1) {
+      result[key] = object[key];
+    }
+  }
+  return result;
+}
+
+// pkg/dist-src/util/url-template.js
+function encodeReserved$1(str) {
+  return str.split(/(%[0-9A-Fa-f]{2})/g).map(function(part) {
+    if (!/%[0-9A-Fa-f]/.test(part)) {
+      part = encodeURI(part).replace(/%5B/g, "[").replace(/%5D/g, "]");
+    }
+    return part;
+  }).join("");
+}
+function encodeUnreserved$1(str) {
+  return encodeURIComponent(str).replace(/[!'()*]/g, function(c) {
+    return "%" + c.charCodeAt(0).toString(16).toUpperCase();
+  });
+}
+function encodeValue$1(operator, value, key) {
+  value = operator === "+" || operator === "#" ? encodeReserved$1(value) : encodeUnreserved$1(value);
+  if (key) {
+    return encodeUnreserved$1(key) + "=" + value;
+  } else {
+    return value;
+  }
+}
+function isDefined$1(value) {
+  return value !== void 0 && value !== null;
+}
+function isKeyOperator$1(operator) {
+  return operator === ";" || operator === "&" || operator === "?";
+}
+function getValues$1(context, operator, key, modifier) {
+  var value = context[key], result = [];
+  if (isDefined$1(value) && value !== "") {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      value = value.toString();
+      if (modifier && modifier !== "*") {
+        value = value.substring(0, parseInt(modifier, 10));
+      }
+      result.push(
+        encodeValue$1(operator, value, isKeyOperator$1(operator) ? key : "")
+      );
+    } else {
+      if (modifier === "*") {
+        if (Array.isArray(value)) {
+          value.filter(isDefined$1).forEach(function(value2) {
+            result.push(
+              encodeValue$1(operator, value2, isKeyOperator$1(operator) ? key : "")
+            );
+          });
+        } else {
+          Object.keys(value).forEach(function(k) {
+            if (isDefined$1(value[k])) {
+              result.push(encodeValue$1(operator, value[k], k));
+            }
+          });
+        }
+      } else {
+        const tmp = [];
+        if (Array.isArray(value)) {
+          value.filter(isDefined$1).forEach(function(value2) {
+            tmp.push(encodeValue$1(operator, value2));
+          });
+        } else {
+          Object.keys(value).forEach(function(k) {
+            if (isDefined$1(value[k])) {
+              tmp.push(encodeUnreserved$1(k));
+              tmp.push(encodeValue$1(operator, value[k].toString()));
+            }
+          });
+        }
+        if (isKeyOperator$1(operator)) {
+          result.push(encodeUnreserved$1(key) + "=" + tmp.join(","));
+        } else if (tmp.length !== 0) {
+          result.push(tmp.join(","));
+        }
+      }
+    }
+  } else {
+    if (operator === ";") {
+      if (isDefined$1(value)) {
+        result.push(encodeUnreserved$1(key));
+      }
+    } else if (value === "" && (operator === "&" || operator === "?")) {
+      result.push(encodeUnreserved$1(key) + "=");
+    } else if (value === "") {
+      result.push("");
+    }
+  }
+  return result;
+}
+function parseUrl$1(template) {
+  return {
+    expand: expand$1.bind(null, template)
+  };
+}
+function expand$1(template, context) {
+  var operators = ["+", "#", ".", "/", ";", "?", "&"];
+  template = template.replace(
+    /\{([^\{\}]+)\}|([^\{\}]+)/g,
+    function(_, expression, literal) {
+      if (expression) {
+        let operator = "";
+        const values = [];
+        if (operators.indexOf(expression.charAt(0)) !== -1) {
+          operator = expression.charAt(0);
+          expression = expression.substr(1);
+        }
+        expression.split(/,/g).forEach(function(variable) {
+          var tmp = /([^:\*]*)(?::(\d+)|(\*))?/.exec(variable);
+          values.push(getValues$1(context, operator, tmp[1], tmp[2] || tmp[3]));
+        });
+        if (operator && operator !== "+") {
+          var separator = ",";
+          if (operator === "?") {
+            separator = "&";
+          } else if (operator !== "#") {
+            separator = operator;
+          }
+          return (values.length !== 0 ? operator : "") + values.join(separator);
+        } else {
+          return values.join(",");
+        }
+      } else {
+        return encodeReserved$1(literal);
+      }
+    }
+  );
+  if (template === "/") {
+    return template;
+  } else {
+    return template.replace(/\/$/, "");
+  }
+}
+
+// pkg/dist-src/parse.js
+function parse$1(options) {
+  let method = options.method.toUpperCase();
+  let url = (options.url || "/").replace(/:([a-z]\w+)/g, "{$1}");
+  let headers = Object.assign({}, options.headers);
+  let body;
+  let parameters = omit$1(options, [
+    "method",
+    "baseUrl",
+    "url",
+    "headers",
+    "request",
+    "mediaType"
+  ]);
+  const urlVariableNames = extractUrlVariableNames$1(url);
+  url = parseUrl$1(url).expand(parameters);
+  if (!/^http/.test(url)) {
+    url = options.baseUrl + url;
+  }
+  const omittedParameters = Object.keys(options).filter((option) => urlVariableNames.includes(option)).concat("baseUrl");
+  const remainingParameters = omit$1(parameters, omittedParameters);
+  const isBinaryRequest = /application\/octet-stream/i.test(headers.accept);
+  if (!isBinaryRequest) {
+    if (options.mediaType.format) {
+      headers.accept = headers.accept.split(/,/).map(
+        (format) => format.replace(
+          /application\/vnd(\.\w+)(\.v3)?(\.\w+)?(\+json)?$/,
+          `application/vnd$1$2.${options.mediaType.format}`
+        )
+      ).join(",");
+    }
+    if (url.endsWith("/graphql")) {
+      if (options.mediaType.previews?.length) {
+        const previewsFromAcceptHeader = headers.accept.match(/(?<![\w-])[\w-]+(?=-preview)/g) || [];
+        headers.accept = previewsFromAcceptHeader.concat(options.mediaType.previews).map((preview) => {
+          const format = options.mediaType.format ? `.${options.mediaType.format}` : "+json";
+          return `application/vnd.github.${preview}-preview${format}`;
+        }).join(",");
+      }
+    }
+  }
+  if (["GET", "HEAD"].includes(method)) {
+    url = addQueryParameters$1(url, remainingParameters);
+  } else {
+    if ("data" in remainingParameters) {
+      body = remainingParameters.data;
+    } else {
+      if (Object.keys(remainingParameters).length) {
+        body = remainingParameters;
+      }
+    }
+  }
+  if (!headers["content-type"] && typeof body !== "undefined") {
+    headers["content-type"] = "application/json; charset=utf-8";
+  }
+  if (["PATCH", "PUT"].includes(method) && typeof body === "undefined") {
+    body = "";
+  }
+  return Object.assign(
+    { method, url, headers },
+    typeof body !== "undefined" ? { body } : null,
+    options.request ? { request: options.request } : null
+  );
+}
+
+// pkg/dist-src/endpoint-with-defaults.js
+function endpointWithDefaults$1(defaults, route, options) {
+  return parse$1(merge$1(defaults, route, options));
+}
+
+// pkg/dist-src/with-defaults.js
+function withDefaults$4(oldDefaults, newDefaults) {
+  const DEFAULTS2 = merge$1(oldDefaults, newDefaults);
+  const endpoint2 = endpointWithDefaults$1.bind(null, DEFAULTS2);
+  return Object.assign(endpoint2, {
+    DEFAULTS: DEFAULTS2,
+    defaults: withDefaults$4.bind(null, DEFAULTS2),
+    merge: merge$1.bind(null, DEFAULTS2),
+    parse: parse$1
+  });
+}
+
+// pkg/dist-src/index.js
+var endpoint$1 = withDefaults$4(null, DEFAULTS$1);
+
+var fastContentTypeParse = {};
+
+var hasRequiredFastContentTypeParse;
+
+function requireFastContentTypeParse () {
+	if (hasRequiredFastContentTypeParse) return fastContentTypeParse;
+	hasRequiredFastContentTypeParse = 1;
+
+	const NullObject = function NullObject () { };
+	NullObject.prototype = Object.create(null);
+
+	/**
+	 * RegExp to match *( ";" parameter ) in RFC 7231 sec 3.1.1.1
+	 *
+	 * parameter     = token "=" ( token / quoted-string )
+	 * token         = 1*tchar
+	 * tchar         = "!" / "#" / "$" / "%" / "&" / "'" / "*"
+	 *               / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
+	 *               / DIGIT / ALPHA
+	 *               ; any VCHAR, except delimiters
+	 * quoted-string = DQUOTE *( qdtext / quoted-pair ) DQUOTE
+	 * qdtext        = HTAB / SP / %x21 / %x23-5B / %x5D-7E / obs-text
+	 * obs-text      = %x80-FF
+	 * quoted-pair   = "\" ( HTAB / SP / VCHAR / obs-text )
+	 */
+	const paramRE = /; *([!#$%&'*+.^\w`|~-]+)=("(?:[\v\u0020\u0021\u0023-\u005b\u005d-\u007e\u0080-\u00ff]|\\[\v\u0020-\u00ff])*"|[!#$%&'*+.^\w`|~-]+) */gu;
+
+	/**
+	 * RegExp to match quoted-pair in RFC 7230 sec 3.2.6
+	 *
+	 * quoted-pair = "\" ( HTAB / SP / VCHAR / obs-text )
+	 * obs-text    = %x80-FF
+	 */
+	const quotedPairRE = /\\([\v\u0020-\u00ff])/gu;
+
+	/**
+	 * RegExp to match type in RFC 7231 sec 3.1.1.1
+	 *
+	 * media-type = type "/" subtype
+	 * type       = token
+	 * subtype    = token
+	 */
+	const mediaTypeRE = /^[!#$%&'*+.^\w|~-]+\/[!#$%&'*+.^\w|~-]+$/u;
+
+	// default ContentType to prevent repeated object creation
+	const defaultContentType = { type: '', parameters: new NullObject() };
+	Object.freeze(defaultContentType.parameters);
+	Object.freeze(defaultContentType);
+
+	/**
+	 * Parse media type to object.
+	 *
+	 * @param {string|object} header
+	 * @return {Object}
+	 * @public
+	 */
+
+	function parse (header) {
+	  if (typeof header !== 'string') {
+	    throw new TypeError('argument header is required and must be a string')
+	  }
+
+	  let index = header.indexOf(';');
+	  const type = index !== -1
+	    ? header.slice(0, index).trim()
+	    : header.trim();
+
+	  if (mediaTypeRE.test(type) === false) {
+	    throw new TypeError('invalid media type')
+	  }
+
+	  const result = {
+	    type: type.toLowerCase(),
+	    parameters: new NullObject()
+	  };
+
+	  // parse parameters
+	  if (index === -1) {
+	    return result
+	  }
+
+	  let key;
+	  let match;
+	  let value;
+
+	  paramRE.lastIndex = index;
+
+	  while ((match = paramRE.exec(header))) {
+	    if (match.index !== index) {
+	      throw new TypeError('invalid parameter format')
+	    }
+
+	    index += match[0].length;
+	    key = match[1].toLowerCase();
+	    value = match[2];
+
+	    if (value[0] === '"') {
+	      // remove quotes and escapes
+	      value = value
+	        .slice(1, value.length - 1);
+
+	      quotedPairRE.test(value) && (value = value.replace(quotedPairRE, '$1'));
+	    }
+
+	    result.parameters[key] = value;
+	  }
+
+	  if (index !== header.length) {
+	    throw new TypeError('invalid parameter format')
+	  }
+
+	  return result
+	}
+
+	function safeParse (header) {
+	  if (typeof header !== 'string') {
+	    return defaultContentType
+	  }
+
+	  let index = header.indexOf(';');
+	  const type = index !== -1
+	    ? header.slice(0, index).trim()
+	    : header.trim();
+
+	  if (mediaTypeRE.test(type) === false) {
+	    return defaultContentType
+	  }
+
+	  const result = {
+	    type: type.toLowerCase(),
+	    parameters: new NullObject()
+	  };
+
+	  // parse parameters
+	  if (index === -1) {
+	    return result
+	  }
+
+	  let key;
+	  let match;
+	  let value;
+
+	  paramRE.lastIndex = index;
+
+	  while ((match = paramRE.exec(header))) {
+	    if (match.index !== index) {
+	      return defaultContentType
+	    }
+
+	    index += match[0].length;
+	    key = match[1].toLowerCase();
+	    value = match[2];
+
+	    if (value[0] === '"') {
+	      // remove quotes and escapes
+	      value = value
+	        .slice(1, value.length - 1);
+
+	      quotedPairRE.test(value) && (value = value.replace(quotedPairRE, '$1'));
+	    }
+
+	    result.parameters[key] = value;
+	  }
+
+	  if (index !== header.length) {
+	    return defaultContentType
+	  }
+
+	  return result
+	}
+
+	fastContentTypeParse.default = { parse, safeParse };
+	fastContentTypeParse.parse = parse;
+	fastContentTypeParse.safeParse = safeParse;
+	fastContentTypeParse.defaultContentType = defaultContentType;
+	return fastContentTypeParse;
+}
+
+var fastContentTypeParseExports = requireFastContentTypeParse();
+
+let RequestError$1 = class RequestError extends Error {
+  name;
+  /**
+   * http status code
+   */
+  status;
+  /**
+   * Request options that lead to the error.
+   */
+  request;
+  /**
+   * Response object if a response was received
+   */
+  response;
+  constructor(message, statusCode, options) {
+    super(message, { cause: options.cause });
+    this.name = "HttpError";
+    this.status = Number.parseInt(statusCode);
+    if (Number.isNaN(this.status)) {
+      this.status = 0;
+    }
+    /* v8 ignore else -- @preserve -- Bug with vitest coverage where it sees an else branch that doesn't exist */
+    if ("response" in options) {
+      this.response = options.response;
+    }
+    const requestCopy = Object.assign({}, options.request);
+    if (options.request.headers.authorization) {
+      requestCopy.headers = Object.assign({}, options.request.headers, {
+        authorization: options.request.headers.authorization.replace(
+          /(?<! ) .*$/,
+          " [REDACTED]"
+        )
+      });
+    }
+    requestCopy.url = requestCopy.url.replace(/\bclient_secret=\w+/g, "client_secret=[REDACTED]").replace(/\baccess_token=\w+/g, "access_token=[REDACTED]");
+    this.request = requestCopy;
+  }
+};
+
+// pkg/dist-src/index.js
+
+// pkg/dist-src/version.js
+var VERSION$8 = "10.0.7";
+
+// pkg/dist-src/defaults.js
+var defaults_default$1 = {
+  headers: {
+    "user-agent": `octokit-request.js/${VERSION$8} ${getUserAgent()}`
+  }
+};
+
+// pkg/dist-src/is-plain-object.js
+function isPlainObject$2(value) {
+  if (typeof value !== "object" || value === null) return false;
+  if (Object.prototype.toString.call(value) !== "[object Object]") return false;
+  const proto = Object.getPrototypeOf(value);
+  if (proto === null) return true;
+  const Ctor = Object.prototype.hasOwnProperty.call(proto, "constructor") && proto.constructor;
+  return typeof Ctor === "function" && Ctor instanceof Ctor && Function.prototype.call(Ctor) === Function.prototype.call(value);
+}
+var noop$2 = () => "";
+async function fetchWrapper$1(requestOptions) {
+  const fetch = requestOptions.request?.fetch || globalThis.fetch;
+  if (!fetch) {
+    throw new Error(
+      "fetch is not set. Please pass a fetch implementation as new Octokit({ request: { fetch }}). Learn more at https://github.com/octokit/octokit.js/#fetch-missing"
+    );
+  }
+  const log = requestOptions.request?.log || console;
+  const parseSuccessResponseBody = requestOptions.request?.parseSuccessResponseBody !== false;
+  const body = isPlainObject$2(requestOptions.body) || Array.isArray(requestOptions.body) ? JSON.stringify(requestOptions.body) : requestOptions.body;
+  const requestHeaders = Object.fromEntries(
+    Object.entries(requestOptions.headers).map(([name, value]) => [
+      name,
+      String(value)
+    ])
+  );
+  let fetchResponse;
+  try {
+    fetchResponse = await fetch(requestOptions.url, {
+      method: requestOptions.method,
+      body,
+      redirect: requestOptions.request?.redirect,
+      headers: requestHeaders,
+      signal: requestOptions.request?.signal,
+      // duplex must be set if request.body is ReadableStream or Async Iterables.
+      // See https://fetch.spec.whatwg.org/#dom-requestinit-duplex.
+      ...requestOptions.body && { duplex: "half" }
+    });
+  } catch (error) {
+    let message = "Unknown Error";
+    if (error instanceof Error) {
+      if (error.name === "AbortError") {
+        error.status = 500;
+        throw error;
+      }
+      message = error.message;
+      if (error.name === "TypeError" && "cause" in error) {
+        if (error.cause instanceof Error) {
+          message = error.cause.message;
+        } else if (typeof error.cause === "string") {
+          message = error.cause;
+        }
+      }
+    }
+    const requestError = new RequestError$1(message, 500, {
+      request: requestOptions
+    });
+    requestError.cause = error;
+    throw requestError;
+  }
+  const status = fetchResponse.status;
+  const url = fetchResponse.url;
+  const responseHeaders = {};
+  for (const [key, value] of fetchResponse.headers) {
+    responseHeaders[key] = value;
+  }
+  const octokitResponse = {
+    url,
+    status,
+    headers: responseHeaders,
+    data: ""
+  };
+  if ("deprecation" in responseHeaders) {
+    const matches = responseHeaders.link && responseHeaders.link.match(/<([^<>]+)>; rel="deprecation"/);
+    const deprecationLink = matches && matches.pop();
+    log.warn(
+      `[@octokit/request] "${requestOptions.method} ${requestOptions.url}" is deprecated. It is scheduled to be removed on ${responseHeaders.sunset}${deprecationLink ? `. See ${deprecationLink}` : ""}`
+    );
+  }
+  if (status === 204 || status === 205) {
+    return octokitResponse;
+  }
+  if (requestOptions.method === "HEAD") {
+    if (status < 400) {
+      return octokitResponse;
+    }
+    throw new RequestError$1(fetchResponse.statusText, status, {
+      response: octokitResponse,
+      request: requestOptions
+    });
+  }
+  if (status === 304) {
+    octokitResponse.data = await getResponseData$1(fetchResponse);
+    throw new RequestError$1("Not modified", status, {
+      response: octokitResponse,
+      request: requestOptions
+    });
+  }
+  if (status >= 400) {
+    octokitResponse.data = await getResponseData$1(fetchResponse);
+    throw new RequestError$1(toErrorMessage$1(octokitResponse.data), status, {
+      response: octokitResponse,
+      request: requestOptions
+    });
+  }
+  octokitResponse.data = parseSuccessResponseBody ? await getResponseData$1(fetchResponse) : fetchResponse.body;
+  return octokitResponse;
+}
+async function getResponseData$1(response) {
+  const contentType = response.headers.get("content-type");
+  if (!contentType) {
+    return response.text().catch(noop$2);
+  }
+  const mimetype = fastContentTypeParseExports.safeParse(contentType);
+  if (isJSONResponse$1(mimetype)) {
+    let text = "";
+    try {
+      text = await response.text();
+      return JSON.parse(text);
+    } catch (err) {
+      return text;
+    }
+  } else if (mimetype.type.startsWith("text/") || mimetype.parameters.charset?.toLowerCase() === "utf-8") {
+    return response.text().catch(noop$2);
+  } else {
+    return response.arrayBuffer().catch(
+      /* v8 ignore next -- @preserve */
+      () => new ArrayBuffer(0)
+    );
+  }
+}
+function isJSONResponse$1(mimetype) {
+  return mimetype.type === "application/json" || mimetype.type === "application/scim+json";
+}
+function toErrorMessage$1(data) {
+  if (typeof data === "string") {
+    return data;
+  }
+  if (data instanceof ArrayBuffer) {
+    return "Unknown error";
+  }
+  if ("message" in data) {
+    const suffix = "documentation_url" in data ? ` - ${data.documentation_url}` : "";
+    return Array.isArray(data.errors) ? `${data.message}: ${data.errors.map((v) => JSON.stringify(v)).join(", ")}${suffix}` : `${data.message}${suffix}`;
+  }
+  return `Unknown error: ${JSON.stringify(data)}`;
+}
+
+// pkg/dist-src/with-defaults.js
+function withDefaults$3(oldEndpoint, newDefaults) {
+  const endpoint2 = oldEndpoint.defaults(newDefaults);
+  const newApi = function(route, parameters) {
+    const endpointOptions = endpoint2.merge(route, parameters);
+    if (!endpointOptions.request || !endpointOptions.request.hook) {
+      return fetchWrapper$1(endpoint2.parse(endpointOptions));
+    }
+    const request2 = (route2, parameters2) => {
+      return fetchWrapper$1(
+        endpoint2.parse(endpoint2.merge(route2, parameters2))
+      );
+    };
+    Object.assign(request2, {
+      endpoint: endpoint2,
+      defaults: withDefaults$3.bind(null, endpoint2)
+    });
+    return endpointOptions.request.hook(request2, endpointOptions);
+  };
+  return Object.assign(newApi, {
+    endpoint: endpoint2,
+    defaults: withDefaults$3.bind(null, endpoint2)
+  });
+}
+
+// pkg/dist-src/index.js
+var request$1 = withDefaults$3(endpoint$1, defaults_default$1);
+/* v8 ignore next -- @preserve */
+/* v8 ignore else -- @preserve */
+
+// pkg/dist-src/defaults.js
+
+// pkg/dist-src/version.js
 var VERSION$7 = "0.0.0-development";
 
 // pkg/dist-src/defaults.js
@@ -39121,186 +38152,6 @@ function withDefaults$2(oldDefaults, newDefaults) {
 // pkg/dist-src/index.js
 var endpoint = withDefaults$2(null, DEFAULTS);
 
-var fastContentTypeParse = {};
-
-var hasRequiredFastContentTypeParse;
-
-function requireFastContentTypeParse () {
-	if (hasRequiredFastContentTypeParse) return fastContentTypeParse;
-	hasRequiredFastContentTypeParse = 1;
-
-	const NullObject = function NullObject () { };
-	NullObject.prototype = Object.create(null);
-
-	/**
-	 * RegExp to match *( ";" parameter ) in RFC 7231 sec 3.1.1.1
-	 *
-	 * parameter     = token "=" ( token / quoted-string )
-	 * token         = 1*tchar
-	 * tchar         = "!" / "#" / "$" / "%" / "&" / "'" / "*"
-	 *               / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
-	 *               / DIGIT / ALPHA
-	 *               ; any VCHAR, except delimiters
-	 * quoted-string = DQUOTE *( qdtext / quoted-pair ) DQUOTE
-	 * qdtext        = HTAB / SP / %x21 / %x23-5B / %x5D-7E / obs-text
-	 * obs-text      = %x80-FF
-	 * quoted-pair   = "\" ( HTAB / SP / VCHAR / obs-text )
-	 */
-	const paramRE = /; *([!#$%&'*+.^\w`|~-]+)=("(?:[\v\u0020\u0021\u0023-\u005b\u005d-\u007e\u0080-\u00ff]|\\[\v\u0020-\u00ff])*"|[!#$%&'*+.^\w`|~-]+) */gu;
-
-	/**
-	 * RegExp to match quoted-pair in RFC 7230 sec 3.2.6
-	 *
-	 * quoted-pair = "\" ( HTAB / SP / VCHAR / obs-text )
-	 * obs-text    = %x80-FF
-	 */
-	const quotedPairRE = /\\([\v\u0020-\u00ff])/gu;
-
-	/**
-	 * RegExp to match type in RFC 7231 sec 3.1.1.1
-	 *
-	 * media-type = type "/" subtype
-	 * type       = token
-	 * subtype    = token
-	 */
-	const mediaTypeRE = /^[!#$%&'*+.^\w|~-]+\/[!#$%&'*+.^\w|~-]+$/u;
-
-	// default ContentType to prevent repeated object creation
-	const defaultContentType = { type: '', parameters: new NullObject() };
-	Object.freeze(defaultContentType.parameters);
-	Object.freeze(defaultContentType);
-
-	/**
-	 * Parse media type to object.
-	 *
-	 * @param {string|object} header
-	 * @return {Object}
-	 * @public
-	 */
-
-	function parse (header) {
-	  if (typeof header !== 'string') {
-	    throw new TypeError('argument header is required and must be a string')
-	  }
-
-	  let index = header.indexOf(';');
-	  const type = index !== -1
-	    ? header.slice(0, index).trim()
-	    : header.trim();
-
-	  if (mediaTypeRE.test(type) === false) {
-	    throw new TypeError('invalid media type')
-	  }
-
-	  const result = {
-	    type: type.toLowerCase(),
-	    parameters: new NullObject()
-	  };
-
-	  // parse parameters
-	  if (index === -1) {
-	    return result
-	  }
-
-	  let key;
-	  let match;
-	  let value;
-
-	  paramRE.lastIndex = index;
-
-	  while ((match = paramRE.exec(header))) {
-	    if (match.index !== index) {
-	      throw new TypeError('invalid parameter format')
-	    }
-
-	    index += match[0].length;
-	    key = match[1].toLowerCase();
-	    value = match[2];
-
-	    if (value[0] === '"') {
-	      // remove quotes and escapes
-	      value = value
-	        .slice(1, value.length - 1);
-
-	      quotedPairRE.test(value) && (value = value.replace(quotedPairRE, '$1'));
-	    }
-
-	    result.parameters[key] = value;
-	  }
-
-	  if (index !== header.length) {
-	    throw new TypeError('invalid parameter format')
-	  }
-
-	  return result
-	}
-
-	function safeParse (header) {
-	  if (typeof header !== 'string') {
-	    return defaultContentType
-	  }
-
-	  let index = header.indexOf(';');
-	  const type = index !== -1
-	    ? header.slice(0, index).trim()
-	    : header.trim();
-
-	  if (mediaTypeRE.test(type) === false) {
-	    return defaultContentType
-	  }
-
-	  const result = {
-	    type: type.toLowerCase(),
-	    parameters: new NullObject()
-	  };
-
-	  // parse parameters
-	  if (index === -1) {
-	    return result
-	  }
-
-	  let key;
-	  let match;
-	  let value;
-
-	  paramRE.lastIndex = index;
-
-	  while ((match = paramRE.exec(header))) {
-	    if (match.index !== index) {
-	      return defaultContentType
-	    }
-
-	    index += match[0].length;
-	    key = match[1].toLowerCase();
-	    value = match[2];
-
-	    if (value[0] === '"') {
-	      // remove quotes and escapes
-	      value = value
-	        .slice(1, value.length - 1);
-
-	      quotedPairRE.test(value) && (value = value.replace(quotedPairRE, '$1'));
-	    }
-
-	    result.parameters[key] = value;
-	  }
-
-	  if (index !== header.length) {
-	    return defaultContentType
-	  }
-
-	  return result
-	}
-
-	fastContentTypeParse.default = { parse, safeParse };
-	fastContentTypeParse.parse = parse;
-	fastContentTypeParse.safeParse = safeParse;
-	fastContentTypeParse.defaultContentType = defaultContentType;
-	return fastContentTypeParse;
-}
-
-var fastContentTypeParseExports = requireFastContentTypeParse();
-
 class RequestError extends Error {
   name;
   /**
@@ -39316,12 +38167,13 @@ class RequestError extends Error {
    */
   response;
   constructor(message, statusCode, options) {
-    super(message);
+    super(message, { cause: options.cause });
     this.name = "HttpError";
     this.status = Number.parseInt(statusCode);
     if (Number.isNaN(this.status)) {
       this.status = 0;
     }
+    /* v8 ignore else -- @preserve -- Bug with vitest coverage where it sees an else branch that doesn't exist */
     if ("response" in options) {
       this.response = options.response;
     }
@@ -39342,7 +38194,7 @@ class RequestError extends Error {
 // pkg/dist-src/index.js
 
 // pkg/dist-src/version.js
-var VERSION$6 = "10.0.6";
+var VERSION$6 = "10.0.7";
 
 // pkg/dist-src/defaults.js
 var defaults_default = {
@@ -39360,6 +38212,7 @@ function isPlainObject(value) {
   const Ctor = Object.prototype.hasOwnProperty.call(proto, "constructor") && proto.constructor;
   return typeof Ctor === "function" && Ctor instanceof Ctor && Function.prototype.call(Ctor) === Function.prototype.call(value);
 }
+var noop$1 = () => "";
 async function fetchWrapper(requestOptions) {
   const fetch = requestOptions.request?.fetch || globalThis.fetch;
   if (!fetch) {
@@ -39461,7 +38314,7 @@ async function fetchWrapper(requestOptions) {
 async function getResponseData(response) {
   const contentType = response.headers.get("content-type");
   if (!contentType) {
-    return response.text().catch(() => "");
+    return response.text().catch(noop$1);
   }
   const mimetype = fastContentTypeParseExports.safeParse(contentType);
   if (isJSONResponse(mimetype)) {
@@ -39473,9 +38326,12 @@ async function getResponseData(response) {
       return text;
     }
   } else if (mimetype.type.startsWith("text/") || mimetype.parameters.charset?.toLowerCase() === "utf-8") {
-    return response.text().catch(() => "");
+    return response.text().catch(noop$1);
   } else {
-    return response.arrayBuffer().catch(() => new ArrayBuffer(0));
+    return response.arrayBuffer().catch(
+      /* v8 ignore next -- @preserve */
+      () => new ArrayBuffer(0)
+    );
   }
 }
 function isJSONResponse(mimetype) {
@@ -39522,6 +38378,8 @@ function withDefaults$1(oldEndpoint, newDefaults) {
 
 // pkg/dist-src/index.js
 var request = withDefaults$1(endpoint, defaults_default);
+/* v8 ignore next -- @preserve */
+/* v8 ignore else -- @preserve */
 
 // pkg/dist-src/index.js
 
@@ -39758,7 +38616,7 @@ let Octokit$1 = class Octokit {
   constructor(options = {}) {
     const hook = new Hook.Collection();
     const requestDefaults = {
-      baseUrl: request.endpoint.DEFAULTS.baseUrl,
+      baseUrl: request$1.endpoint.DEFAULTS.baseUrl,
       headers: {},
       request: Object.assign({}, options.request, {
         // @ts-ignore internal usage only, no need to type
@@ -39779,7 +38637,7 @@ let Octokit$1 = class Octokit {
     if (options.timeZone) {
       requestDefaults.headers["time-zone"] = options.timeZone;
     }
-    this.request = request.defaults(requestDefaults);
+    this.request = request$1.defaults(requestDefaults);
     this.graphql = withCustomRequest(this.request).defaults(requestDefaults);
     this.log = createLogger(options.log);
     this.hook = hook;
