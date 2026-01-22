@@ -7,8 +7,8 @@ import typescript from '@rollup/plugin-typescript'
 // Plugin to exclude sqlite-cache-store
 const excludeSqliteCacheStore = () => ({
   name: 'exclude-sqlite-cache-store',
-  resolveId(source) {
-    if (source.includes('sqlite-cache-store')) {
+  resolveId(source, importer, options) {
+    if (source.endsWith('sqlite-cache-store.js') || source.endsWith('sqlite-cache-store')) {
       return { id: source, external: true, moduleSideEffects: false }
     }
     return null
