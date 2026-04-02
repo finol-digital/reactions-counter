@@ -22,7 +22,7 @@ engagement and popularity of issues in your project.
 ```yaml
 steps:
   - name: Count Reactions
-    uses: finol-digital/reactions-counter@v1
+    uses: finol-digital/reactions-counter@v2
     with:
       project-url: 'https://github.com/finol-digital/Card-Game-Simulator/projects/1'
       github-token: ${{ secrets.CGS_PAT }}
@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Count Reactions
-        uses: finol-digital/reactions-counter@v1
+        uses: finol-digital/reactions-counter@v2
         with:
           project-url: 'https://github.com/finol-digital/Card-Game-Simulator/projects/1'
           github-token: ${{ secrets.CGS_PAT }}
@@ -70,7 +70,7 @@ jobs:
 
 ### Prerequisites
 
-- Node.js 20.x or later
+- Node.js 24.x or later
 - npm
 
 ### Setup
