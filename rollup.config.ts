@@ -43,6 +43,10 @@ const stubSqliteCacheStore = () => ({
 
 const config = {
   input: 'src/index.ts',
+  // Do not bundle these runtime/node-specific modules. Leave them as externals
+  // so Rollup won't process their CommonJS output which triggers the
+  // "this has been rewritten to \"undefined\"" warnings.
+  external: ['@actions/core', '@octokit/rest'],
   output: {
     esModule: true,
     file: 'dist/index.js',
