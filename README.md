@@ -1,9 +1,9 @@
 # GitHub Reactions Counter Action
 
-[![GitHub Super-Linter](https://github.com/actions/typescript-action/actions/workflows/linter.yml/badge.svg)](https://github.com/super-linter/super-linter)
-![CI](https://github.com/actions/typescript-action/actions/workflows/ci.yml/badge.svg)
-[![Check dist/](https://github.com/actions/typescript-action/actions/workflows/check-dist.yml/badge.svg)](https://github.com/actions/typescript-action/actions/workflows/check-dist.yml)
-[![CodeQL](https://github.com/actions/typescript-action/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/actions/typescript-action/actions/workflows/codeql-analysis.yml)
+[![Lint Codebase](https://github.com/finol-digital/reactions-counter/actions/workflows/linter.yml/badge.svg)](https://github.com/finol-digital/reactions-counter/actions/workflows/linter.yml)
+[![Continuous Integration](https://github.com/finol-digital/reactions-counter/actions/workflows/ci.yml/badge.svg)](https://github.com/finol-digital/reactions-counter/actions/workflows/ci.yml)
+[![Check Transpiled JavaScript](https://github.com/finol-digital/reactions-counter/actions/workflows/check-dist.yml/badge.svg)](https://github.com/finol-digital/reactions-counter/actions/workflows/check-dist.yml)
+[![CodeQL](https://github.com/finol-digital/reactions-counter/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/finol-digital/reactions-counter/actions/workflows/codeql-analysis.yml)
 [![Coverage](./badges/coverage.svg)](./badges/coverage.svg)
 
 A GitHub Action that automatically counts reactions on GitHub Issues and updates
