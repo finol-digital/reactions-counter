@@ -11014,7 +11014,7 @@ function requireClientH1 () {
 
 	function clearIdleSocketValidation (socket) {
 	  if (socket[kIdleSocketValidationTimeout]) {
-	    clearTimeout(socket[kIdleSocketValidationTimeout]);
+	    clearImmediate(socket[kIdleSocketValidationTimeout]);
 	    socket[kIdleSocketValidationTimeout] = null;
 	  }
 
@@ -11023,15 +11023,23 @@ function requireClientH1 () {
 
 	function scheduleIdleSocketValidation (client, socket) {
 	  socket[kIdleSocketValidation] = 1;
-	  socket[kIdleSocketValidationTimeout] = setTimeout(() => {
+	  // Yield to the check phase (after poll) so unsolicited bytes / FIN / RST
+	  // already pending on this idle keep-alive socket are processed before the
+	  // next request is written (GHSA-35p6-xmwp-9g52).
+	  //
+	  // setTimeout(0) pays Node's ~1ms timer floor on every sequential reuse
+	  // (#5493). setImmediate avoids that, but an *unref'd* Immediate lets poll
+	  // block for ~500ms when the event loop is otherwise idle (#5600 / #5606).
+	  // A ref'd Immediate both keeps the pending request alive and makes poll
+	  // return immediately — the hybrid those issues asked for.
+	  socket[kIdleSocketValidationTimeout] = setImmediate(() => {
 	    socket[kIdleSocketValidationTimeout] = null;
 	    socket[kIdleSocketValidation] = 2;
 
 	    if (client[kSocket] === socket && !socket.destroyed) {
 	      client[kResume]();
 	    }
-	  }, 0);
-	  socket[kIdleSocketValidationTimeout].unref?.();
+	  });
 	}
 
 	/**
@@ -11749,7 +11757,9 @@ function requireClientH2 () {
 	  RequestAbortedError,
 	  SocketError,
 	  InformationalError,
-	  InvalidArgumentError
+	  InvalidArgumentError,
+	  HeadersTimeoutError,
+	  BodyTimeoutError
 	} = requireErrors();
 	const {
 	  kUrl,
@@ -11774,6 +11784,7 @@ function requireClientH2 () {
 	  kHTTPContext,
 	  kClosed,
 	  kBodyTimeout,
+	  kHeadersTimeout,
 	  kEnableConnectProtocol,
 	  kRemoteSettings,
 	  kHTTP2Stream,
@@ -11960,7 +11971,11 @@ function requireClientH2 () {
 	  const socket = client[kSocket];
 
 	  if (socket?.destroyed === false) {
-	    if (client[kSize] === 0 || client[kMaxConcurrentStreams] === 0) {
+	    // Only let the process exit when there is genuinely nothing outstanding.
+	    // Unreffing because the peer advertised MAX_CONCURRENT_STREAMS = 0 left
+	    // queued requests with nothing holding the event loop open, so the process
+	    // could exit with status 0 while an awaited request never settled.
+	    if (client[kSize] === 0) {
 	      socket.unref();
 	      client[kHTTP2Session].unref();
 	    } else {
@@ -12055,6 +12070,36 @@ function requireClientH2 () {
 	 * @this {import('http2').ClientHttp2Session}
 	 * @param {number} errorCode
 	 */
+	// Backport of #5410 and #5569. HTTP/2 multiplexes, so requests complete out of
+	// order; advancing kRunningIdx blindly retired whichever request happened to
+	// sit at the head instead of the one that actually finished, which both lost
+	// requests and left phantom running slots behind.
+	function completeRequest (client, request, resetPendingIdx = false) {
+	  const queue = client[kQueue];
+	  const runningIdx = client[kRunningIdx];
+
+	  // In-order completion: clear the request and advance without splicing.
+	  // The client's resume loop compacts cleared slots once the index grows.
+	  if (runningIdx < client[kPendingIdx] && queue[runningIdx] === request) {
+	    queue[runningIdx] = null;
+	    client[kRunningIdx] = runningIdx + 1;
+	    return
+	  }
+
+	  const index = queue.indexOf(request, runningIdx);
+
+	  if (index === -1 || index >= client[kPendingIdx]) {
+	    return
+	  }
+
+	  queue.splice(index, 1);
+	  client[kPendingIdx]--;
+
+	  if (resetPendingIdx && client[kPendingIdx] < client[kRunningIdx]) {
+	    client[kPendingIdx] = client[kRunningIdx];
+	  }
+	}
+
 	function onHttp2SessionGoAway (errorCode) {
 	  // TODO(mcollina): Verify if GOAWAY implements the spec correctly:
 	  // https://datatracker.ietf.org/doc/html/rfc7540#section-6.8
@@ -12076,7 +12121,9 @@ function requireClientH2 () {
 	  if (client[kRunningIdx] < client[kQueue].length) {
 	    const request = client[kQueue][client[kRunningIdx]];
 	    client[kQueue][client[kRunningIdx]++] = null;
-	    util.errorRequest(client, request, err);
+	    if (request != null) {
+	      util.errorRequest(client, request, err);
+	    }
 	    client[kPendingIdx] = client[kRunningIdx];
 	  }
 
@@ -12109,7 +12156,9 @@ function requireClientH2 () {
 	    const requests = client[kQueue].splice(client[kRunningIdx]);
 	    for (let i = 0; i < requests.length; i++) {
 	      const request = requests[i];
-	      util.errorRequest(client, request, err);
+	      if (request != null) {
+	        util.errorRequest(client, request, err);
+	      }
 	    }
 	  }
 	}
@@ -12157,7 +12206,10 @@ function requireClientH2 () {
 	}
 
 	function writeH2 (client, request) {
-	  const requestTimeout = request.bodyTimeout ?? client[kBodyTimeout];
+	  // Time to the response headers, then time between body chunks. Using
+	  // bodyTimeout for both made headersTimeout a no-op over HTTP/2.
+	  const headersTimeout = request.headersTimeout ?? client[kHeadersTimeout];
+	  const bodyTimeout = request.bodyTimeout ?? client[kBodyTimeout];
 	  const session = client[kHTTP2Session];
 	  const { method, path, host, upgrade, expectContinue, signal, protocol, headers: reqHeaders } = request;
 	  let { body } = request;
@@ -12224,6 +12276,7 @@ function requireClientH2 () {
 
 	      // We move the running index to the next request
 	      client[kOnError](err);
+	      completeRequest(client, request);
 	      client[kResume]();
 	    }
 
@@ -12278,7 +12331,7 @@ function requireClientH2 () {
 	        request.onUpgrade(statusCode, parseH2Headers(realHeaders), stream);
 
 	        ++session[kOpenStreams];
-	        client[kQueue][client[kRunningIdx]++] = null;
+	        completeRequest(client, request);
 	      });
 
 	      stream.on('error', () => {
@@ -12295,7 +12348,7 @@ function requireClientH2 () {
 	        if (session[kOpenStreams] === 0) session.unref();
 	      });
 
-	      stream.setTimeout(requestTimeout);
+	      stream.setTimeout(headersTimeout);
 	      return true
 	    }
 
@@ -12311,13 +12364,14 @@ function requireClientH2 () {
 
 	      request.onUpgrade(statusCode, parseH2Headers(realHeaders), stream);
 	      ++session[kOpenStreams];
-	      client[kQueue][client[kRunningIdx]++] = null;
+	      completeRequest(client, request);
 	    });
+	    stream.on('error', abort);
 	    stream.once('close', () => {
 	      session[kOpenStreams] -= 1;
 	      if (session[kOpenStreams] === 0) session.unref();
 	    });
-	    stream.setTimeout(requestTimeout);
+	    stream.setTimeout(headersTimeout);
 
 	    return true
 	  }
@@ -12418,7 +12472,7 @@ function requireClientH2 () {
 
 	  // Increment counter as we have new streams open
 	  ++session[kOpenStreams];
-	  stream.setTimeout(requestTimeout);
+	  stream.setTimeout(headersTimeout);
 
 	  // Track whether we received a response (headers)
 	  let responseReceived = false;
@@ -12427,6 +12481,7 @@ function requireClientH2 () {
 	    const { [HTTP2_HEADER_STATUS]: statusCode, ...realHeaders } = headers;
 	    request.onResponseStarted();
 	    responseReceived = true;
+	    stream.setTimeout(bodyTimeout);
 
 	    // Due to the stream nature, it is possible we face a race condition
 	    // where the stream has been assigned, but the request has been aborted
@@ -12461,14 +12516,13 @@ function requireClientH2 () {
 	        request.onComplete({});
 	      }
 
-	      client[kQueue][client[kRunningIdx]++] = null;
+	      completeRequest(client, request);
 	      client[kResume]();
 	    } else {
 	      // Stream ended without receiving a response - this is an error
 	      // (e.g., server destroyed the stream before sending headers)
 	      abort(new InformationalError('HTTP/2: stream half-closed (remote)'));
-	      client[kQueue][client[kRunningIdx]++] = null;
-	      client[kPendingIdx] = client[kRunningIdx];
+	      completeRequest(client, request, true);
 	      client[kResume]();
 	    }
 	  });
@@ -12478,6 +12532,14 @@ function requireClientH2 () {
 	    session[kOpenStreams] -= 1;
 	    if (session[kOpenStreams] === 0) {
 	      session.unref();
+	    }
+
+	    // A stream can close without ever emitting 'end' or 'error': a peer's
+	    // RST_STREAM(CANCEL) received before the response is reported by Node as a
+	    // bare 'close', and destroying the stream unenrolls its timeout, so no
+	    // 'timeout' follows either. Nothing else would ever settle this request.
+	    if (!request.aborted && !request.completed) {
+	      abort(new InformationalError('HTTP/2: stream closed before the response was complete'));
 	    }
 	  });
 
@@ -12496,7 +12558,9 @@ function requireClientH2 () {
 	  });
 
 	  stream.on('timeout', () => {
-	    const err = new InformationalError(`HTTP/2: "stream timeout after ${requestTimeout}"`);
+	    const err = responseReceived
+	      ? new BodyTimeoutError(`HTTP/2: "body timeout after ${bodyTimeout}"`)
+	      : new HeadersTimeoutError(`HTTP/2: "headers timeout after ${headersTimeout}"`);
 	    stream.removeAllListeners('data');
 	    session[kOpenStreams] -= 1;
 
@@ -13116,7 +13180,9 @@ function requireClient () {
 	      const requests = this[kQueue].splice(this[kPendingIdx]);
 	      for (let i = 0; i < requests.length; i++) {
 	        const request = requests[i];
-	        util.errorRequest(this, request, err);
+	        if (request != null) {
+	          util.errorRequest(this, request, err);
+	        }
 	      }
 
 	      const callback = () => {
@@ -13155,7 +13221,9 @@ function requireClient () {
 
 	    for (let i = 0; i < requests.length; i++) {
 	      const request = requests[i];
-	      util.errorRequest(client, request, err);
+	      if (request != null) {
+	        util.errorRequest(client, request, err);
+	      }
 	    }
 	    assert(client[kSize] === 0);
 	  }
@@ -13954,14 +14022,16 @@ function requireBalancedPool () {
 	}
 
 	class BalancedPool extends PoolBase {
-	  constructor (upstreams = [], { factory = defaultFactory, ...opts } = {}) {
+	  constructor (upstreams = [], { factory = defaultFactory, connect, tls, ...opts } = {}) {
 	    if (typeof factory !== 'function') {
 	      throw new InvalidArgumentError('factory must be a function.')
 	    }
 
 	    super(opts);
 
-	    this[kOptions] = { ...util.deepClone(opts) };
+	    if (connect && typeof connect !== 'function') connect = { ...connect };
+	    if (tls && typeof tls !== 'function') tls = { ...tls };
+	    this[kOptions] = { ...util.deepClone(opts), connect, tls };
 	    this[kOptions].interceptors = opts.interceptors
 	      ? { ...opts.interceptors }
 	      : undefined;
@@ -15937,8 +16007,16 @@ function requireRetryHandler () {
 	    if (this.retryOpts.throwOnError) {
 	      // Preserve old behavior for status codes that are not eligible for retry
 	      if (this.retryOpts.statusCodes.includes(statusCode) === false) {
-	        this.headersSent = true;
-	        this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
+	        if (this.headersSent) {
+	          // The downstream handler already received the response from an
+	          // earlier attempt. Forwarding this response would replace the
+	          // downstream body and leave the original body pending forever.
+	          this.handler.onResponseError?.(controller, err);
+	        } else {
+	          this.headersSent = true;
+	          this.checkpointResponseEnd(headers);
+	          this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
+	        }
 	      } else {
 	        this.error = err;
 	      }
@@ -15948,14 +16026,23 @@ function requireRetryHandler () {
 
 	    if (isDisturbed(this.opts.body)) {
 	      this.headersSent = true;
+	      this.checkpointResponseEnd(headers);
 	      this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
 	      return
 	    }
 
 	    function shouldRetry (passedErr) {
 	      if (passedErr) {
-	        this.headersSent = true;
-	        this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
+	        if (this.headersSent) {
+	          // The downstream handler already received the response from an
+	          // earlier attempt. Forwarding this response would replace the
+	          // downstream body and leave the original body pending forever.
+	          this.handler.onResponseError?.(controller, passedErr);
+	        } else {
+	          this.headersSent = true;
+	          this.checkpointResponseEnd(headers);
+	          this.handler.onResponseStart?.(controller, statusCode, headers, statusMessage);
+	        }
 	        controller.resume();
 	        return
 	      }
@@ -15973,6 +16060,20 @@ function requireRetryHandler () {
 	      },
 	      shouldRetry.bind(this)
 	    );
+	  }
+
+	  checkpointResponseEnd (headers) {
+	    if (this.end == null && this.opts.method !== 'HEAD') {
+	      const contentLength = headers['content-length'];
+	      this.end = contentLength != null ? Number(contentLength) - 1 : null;
+
+	      assert(
+	        this.end == null || Number.isFinite(this.end),
+	        'invalid content-length'
+	      );
+
+	      this.resume = this.end != null;
+	    }
 	  }
 
 	  onRequestStart (controller, context) {
@@ -16095,8 +16196,12 @@ function requireRetryHandler () {
 
 	      const { start, size, end = size ? size - 1 : null } = contentRange;
 
-	      assert(this.start === start, 'content-range mismatch');
-	      assert(this.end == null || this.end === end, 'content-range mismatch');
+	      if (this.start !== start || (this.end != null && this.end !== end)) {
+	        throw new RequestRetryError('Content-Range mismatch', statusCode, {
+	          headers,
+	          data: { count: this.retryCount }
+	        })
+	      }
 
 	      return
 	    }
@@ -16221,7 +16326,7 @@ function requireRetryHandler () {
 	  }
 
 	  onResponseError (controller, err) {
-	    if (controller?.aborted || isDisturbed(this.opts.body)) {
+	    if (controller?.aborted || isDisturbed(this.opts.body) || (this.headersSent && !this.resume)) {
 	      this.handler.onResponseError?.(controller, err);
 	      return
 	    }
@@ -21126,7 +21231,6 @@ function requireDump () {
 	  #maxSize = 1024 * 1024
 	  #dumped = false
 	  #size = 0
-	  #controller = null
 	  aborted = false
 	  reason = false
 
@@ -21148,7 +21252,6 @@ function requireDump () {
 
 	  onRequestStart (controller, context) {
 	    controller.abort = this.#abort.bind(this);
-	    this.#controller = controller;
 
 	    return super.onRequestStart(controller, context)
 	  }
@@ -21172,43 +21275,32 @@ function requireDump () {
 	  }
 
 	  onResponseError (controller, err) {
-	    if (this.#dumped) {
-	      return
-	    }
-
-	    // On network errors before connect, controller will be null
-	    err = this.#controller?.reason ?? err;
-
-	    super.onResponseError(controller, err);
+	    super.onResponseError(controller, this.aborted === true ? this.reason : err);
 	  }
 
 	  onResponseData (controller, chunk) {
 	    this.#size = this.#size + chunk.length;
 
-	    if (this.#size >= this.#maxSize) {
-	      this.#dumped = true;
+	    if (this.#size > this.#maxSize) {
+	      throw new RequestAbortedError(
+	        `Response size (${this.#size}) larger than maxSize (${this.#maxSize})`
+	      )
+	    }
 
-	      if (this.aborted === true) {
-	        super.onResponseError(controller, this.reason);
-	      } else {
-	        super.onResponseEnd(controller, {});
-	      }
+	    if (this.#size === this.#maxSize) {
+	      this.#dumped = true;
 	    }
 
 	    return true
 	  }
 
 	  onResponseEnd (controller, trailers) {
-	    if (this.#dumped) {
-	      return
-	    }
-
-	    if (this.#controller.aborted === true) {
+	    if (this.aborted === true) {
 	      super.onResponseError(controller, this.reason);
 	      return
 	    }
 
-	    super.onResponseEnd(controller, trailers);
+	    super.onResponseEnd(controller, this.#dumped ? {} : trailers);
 	  }
 	}
 
@@ -23387,6 +23479,13 @@ function requireCacheHandler () {
 	    }
 
 	    const cacheControlHeader = resHeaders['cache-control'];
+	    const cacheControlDirectives = cacheControlHeader ? parseCacheControlHeader(cacheControlHeader) : {};
+
+	    if (revalidationResponseDisallowsCachedReuse(this.#cacheType, resHeaders, cacheControlDirectives)) {
+	      deleteCachedValue(this.#store, this.#cacheKey);
+	      return downstreamOnHeaders()
+	    }
+
 	    const heuristicallyCacheable = resHeaders['last-modified'] && arrayIncludes(HEURISTICALLY_CACHEABLE_STATUS_CODES, statusCode);
 	    if (
 	      !cacheControlHeader &&
@@ -23403,8 +23502,7 @@ function requireCacheHandler () {
 	      return downstreamOnHeaders()
 	    }
 
-	    const cacheControlDirectives = cacheControlHeader ? parseCacheControlHeader(cacheControlHeader) : {};
-	    if (!canCacheResponse(this.#cacheType, statusCode, resHeaders, cacheControlDirectives, this.#cacheKey.headers)) {
+	    if (!canCacheResponse(this.#cacheType, this.#cacheKey.method, statusCode, resHeaders, cacheControlDirectives, this.#cacheKey.headers)) {
 	      if (statusCode === 304 && (cacheControlHeader || revalidationResponseDisallowsCachedReuse(this.#cacheType, resHeaders, cacheControlDirectives))) {
 	        deleteCachedValue(this.#store, this.#cacheKey);
 	      }
@@ -23645,7 +23743,10 @@ function requireCacheHandler () {
 	 */
 	function revalidationResponseDisallowsCachedReuse (cacheType, resHeaders, cacheControlDirectives) {
 	  return cacheControlDirectives['no-store'] === true ||
-	    (cacheType === 'shared' && cacheControlDirectives.private === true) ||
+	    (cacheType === 'shared' && (
+	      cacheControlDirectives.private === true ||
+	      Object.hasOwn(resHeaders, 'set-cookie')
+	    )) ||
 	    (resHeaders.vary ? isInvalidOrWildcardVaryHeader(resHeaders.vary) : false)
 	}
 
@@ -23653,12 +23754,16 @@ function requireCacheHandler () {
 	 * @see https://www.rfc-editor.org/rfc/rfc9111.html#name-storing-responses-to-authen
 	 *
 	 * @param {import('../../types/cache-interceptor.d.ts').default.CacheOptions['type']} cacheType
+	 * @param {string} method
 	 * @param {number} statusCode
 	 * @param {import('../../types/header.d.ts').IncomingHttpHeaders} resHeaders
 	 * @param {import('../../types/cache-interceptor.d.ts').default.CacheControlDirectives} cacheControlDirectives
 	 * @param {import('../../types/header.d.ts').IncomingHttpHeaders} [reqHeaders]
 	 */
-	function canCacheResponse (cacheType, statusCode, resHeaders, cacheControlDirectives, reqHeaders) {
+	function canCacheResponse (cacheType, method, statusCode, resHeaders, cacheControlDirectives, reqHeaders) {
+	  if (!arrayIncludes(util.safeHTTPMethods, method)) {
+	    return false
+	  }
 	  // Status code must be final and understood.
 	  if (statusCode < 200 || arrayIncludes(NOT_UNDERSTOOD_STATUS_CODES, statusCode)) {
 	    return false
@@ -23679,7 +23784,10 @@ function requireCacheHandler () {
 	    return false
 	  }
 
-	  if (cacheType === 'shared' && cacheControlDirectives.private === true) {
+	  if (cacheType === 'shared' && (
+	    cacheControlDirectives.private === true ||
+	    Object.hasOwn(resHeaders, 'set-cookie')
+	  )) {
 	    return false
 	  }
 
@@ -24484,7 +24592,10 @@ function requireCache$1 () {
 	 * @returns {boolean}
 	 */
 	function revalidationResponseDisallowsCachedReuse (cacheType, headers) {
-	  if (headers.vary && isInvalidOrWildcardVaryHeader(headers.vary)) {
+	  if (
+	    (headers.vary && isInvalidOrWildcardVaryHeader(headers.vary)) ||
+	    (cacheType === 'shared' && Object.hasOwn(headers, 'set-cookie'))
+	  ) {
 	    return true
 	  }
 
@@ -24743,6 +24854,17 @@ function requireCache$1 () {
 	    return handleUncachedResponse(dispatch, globalOpts, cacheKey, handler, opts, reqCacheControl)
 	  }
 
+	  // Shared stores may outlive the Undici version that wrote them. Do not
+	  // re-serve a Set-Cookie header from an existing shared-cache entry.
+	  if (globalOpts.type === 'shared' && Object.hasOwn(result.headers, 'set-cookie')) {
+	    if (util.isStream(result.body)) {
+	      result.body.on('error', nop).destroy();
+	    }
+
+	    deleteCachedValue(globalOpts.store, cacheKey);
+	    return handleUncachedResponse(dispatch, globalOpts, cacheKey, handler, opts, reqCacheControl)
+	  }
+
 	  const now = Date.now();
 	  if (now > result.deleteAt) {
 	    // Response is expired, cache store shouldn't have given this to us
@@ -24941,6 +25063,11 @@ function requireCache$1 () {
 	       * @type {import('../../types/cache-interceptor.d.ts').default.CacheKey}
 	       */
 	      const cacheKey = makeCacheKey(opts);
+
+	      if (!arrayIncludes(util.safeHTTPMethods, opts.method)) {
+	        return dispatch(opts, new CacheHandler(globalOpts, cacheKey, handler))
+	      }
+
 	      const result = store.get(cacheKey);
 
 	      if (result && typeof result.then === 'function') {
@@ -24978,7 +25105,8 @@ function requireDecompress () {
 	hasRequiredDecompress = 1;
 
 	const { createInflate, createGunzip, createBrotliDecompress, createZstdDecompress } = require$$3$1;
-	const { pipeline } = require$$0$2;
+	const { pipeline, Transform: TransformStream } = require$$0$2;
+	const { InvalidArgumentError, ResponseExceededMaxSizeError } = requireErrors();
 	const DecoratorHandler = requireDecoratorHandler();
 	const { runtimeFeatures } = requireRuntimeFeatures();
 
@@ -24998,6 +25126,31 @@ function requireDecompress () {
 	};
 
 	const defaultSkipStatusCodes = /** @type {const} */ ([204, 304]);
+	const defaultMaxSize = 64 * 1024 * 1024;
+
+	/**
+	 * Limits the output of one stage in a decompression chain.
+	 * @param {number} maxSize - Maximum output size in bytes
+	 * @returns {Transform}
+	 */
+	function createMaxSizeLimiter (maxSize) {
+	  let size = 0;
+
+	  return new TransformStream({
+	    transform (chunk, _encoding, callback) {
+	      const decompressedSize = size + chunk.length;
+	      if (decompressedSize > maxSize) {
+	        callback(new ResponseExceededMaxSizeError(
+	          `Decompressed response size (${decompressedSize}) exceeded maxSize (${maxSize})`
+	        ));
+	        return
+	      }
+
+	      size = decompressedSize;
+	      callback(null, chunk);
+	    }
+	  })
+	}
 
 	let warningEmitted = /** @type {boolean} */ (false);
 
@@ -25005,20 +25158,36 @@ function requireDecompress () {
 	 * @typedef {Object} DecompressHandlerOptions
 	 * @property {number[]|Readonly<number[]>} [skipStatusCodes=[204, 304]] - List of status codes to skip decompression for
 	 * @property {boolean} [skipErrorResponses] - Whether to skip decompression for error responses (status codes >= 400)
+	 * @property {number} [maxSize=67108864] - Maximum decompressed response size in bytes
 	 */
 
 	class DecompressHandler extends DecoratorHandler {
 	  /** @type {Transform[]} */
 	  #decompressors = []
+	  /** @type {Record<string, string | string[]> | undefined} */
+	  #trailers
 	  /** @type {Readonly<number[]>} */
 	  #skipStatusCodes
 	  /** @type {boolean} */
 	  #skipErrorResponses
+	  /** @type {number} */
+	  #maxSize
+	  /** @type {number} */
+	  #decompressedSize = 0
+	  /** @type {boolean} */
+	  #terminated = false
+	  /** @type {boolean} */
+	  #inputEnded = false
 
-	  constructor (handler, { skipStatusCodes = defaultSkipStatusCodes, skipErrorResponses = true } = {}) {
+	  constructor (handler, { skipStatusCodes = defaultSkipStatusCodes, skipErrorResponses = true, maxSize = defaultMaxSize } = {}) {
+	    if (!Number.isSafeInteger(maxSize) || maxSize < 1) {
+	      throw new InvalidArgumentError('maxSize must be a positive integer')
+	    }
+
 	    super(handler);
 	    this.#skipStatusCodes = skipStatusCodes;
 	    this.#skipErrorResponses = skipErrorResponses;
+	    this.#maxSize = maxSize;
 	  }
 
 	  /**
@@ -25038,7 +25207,7 @@ function requireDecompress () {
 	   * Creates a chain of decompressors for multiple content encodings
 	   *
 	   * @param {string} encodings - Comma-separated list of content encodings
-	   * @returns {Array<DecompressorStream>} - Array of decompressor streams
+	   * @returns {Array<Transform>} - Array of decompressor and limiting streams
 	   * @throws {Error} - If the number of content-encodings exceeds the maximum allowed
 	   */
 	  #createDecompressionChain (encodings) {
@@ -25066,7 +25235,40 @@ function requireDecompress () {
 	      decompressors.push(supportedEncodings[encoding]());
 	    }
 
-	    return decompressors
+	    if (decompressors.length < 2) {
+	      return decompressors
+	    }
+
+	    /** @type {Transform[]} */
+	    const streams = [];
+	    for (let i = 0; i < decompressors.length; i++) {
+	      streams.push(decompressors[i]);
+	      if (i < decompressors.length - 1) {
+	        streams.push(createMaxSizeLimiter(this.#maxSize));
+	      }
+	    }
+
+	    return streams
+	  }
+
+	  /**
+	   * Stops decompression and reports an error.
+	   * @param {Controller} controller - The controller to coordinate with
+	   * @param {Error} error - The decompression error
+	   * @returns {void}
+	   */
+	  #fail (controller, error) {
+	    if (this.#terminated) {
+	      return
+	    }
+
+	    if (this.#inputEnded) {
+	      // The request is already marked complete once the compressed input ends,
+	      // so controller.abort() can no longer propagate decoder flush errors.
+	      this.onResponseError(controller, error);
+	    } else {
+	      controller.abort(error);
+	    }
 	  }
 
 	  /**
@@ -25077,8 +25279,21 @@ function requireDecompress () {
 	   */
 	  #setupDecompressorEvents (decompressor, controller) {
 	    decompressor.on('readable', () => {
+	      if (this.#terminated) {
+	        return
+	      }
+
 	      let chunk;
 	      while ((chunk = decompressor.read()) !== null) {
+	        const decompressedSize = this.#decompressedSize + chunk.length;
+	        if (decompressedSize > this.#maxSize) {
+	          this.#fail(controller, new ResponseExceededMaxSizeError(
+	            `Decompressed response size (${decompressedSize}) exceeded maxSize (${this.#maxSize})`
+	          ));
+	          return
+	        }
+
+	        this.#decompressedSize = decompressedSize;
 	        const result = super.onResponseData(controller, chunk);
 	        if (result === false) {
 	          break
@@ -25087,7 +25302,7 @@ function requireDecompress () {
 	    });
 
 	    decompressor.on('error', (error) => {
-	      super.onResponseError(controller, error);
+	      this.#fail(controller, error);
 	    });
 	  }
 
@@ -25101,7 +25316,13 @@ function requireDecompress () {
 	    this.#setupDecompressorEvents(decompressor, controller);
 
 	    decompressor.on('end', () => {
-	      super.onResponseEnd(controller, {});
+	      if (this.#terminated) {
+	        return
+	      }
+
+	      this.#terminated = true;
+	      this.#cleanupDecompressors();
+	      super.onResponseEnd(controller, this.#trailers);
 	    });
 	  }
 
@@ -25115,11 +25336,18 @@ function requireDecompress () {
 	    this.#setupDecompressorEvents(lastDecompressor, controller);
 
 	    pipeline(this.#decompressors, (err) => {
-	      if (err) {
-	        super.onResponseError(controller, err);
+	      if (this.#terminated) {
 	        return
 	      }
-	      super.onResponseEnd(controller, {});
+
+	      if (err) {
+	        this.#fail(controller, err);
+	        return
+	      }
+
+	      this.#terminated = true;
+	      this.#cleanupDecompressors();
+	      super.onResponseEnd(controller, this.#trailers);
 	    });
 	  }
 
@@ -25158,6 +25386,33 @@ function requireDecompress () {
 	    // Remove compression headers since we're decompressing
 	    const { 'content-encoding': _, 'content-length': __, ...newHeaders } = headers;
 
+	    if (controller?.rawHeaders) {
+	      const rawHeaders = controller.rawHeaders;
+
+	      if (Array.isArray(rawHeaders)) {
+	        const filteredHeaders = [];
+	        for (let i = 0; i < rawHeaders.length; i += 2) {
+	          const headerName = rawHeaders[i];
+	          const name = Buffer.isBuffer(headerName) ? headerName.toString('latin1') : `${headerName}`;
+	          const lowerName = name.toLowerCase();
+
+	          if (lowerName === 'content-encoding' || lowerName === 'content-length') {
+	            continue
+	          }
+
+	          filteredHeaders.push(rawHeaders[i], rawHeaders[i + 1]);
+	        }
+	        rawHeaders.splice(0, rawHeaders.length, ...filteredHeaders);
+	      } else if (typeof rawHeaders === 'object') {
+	        for (const name of Object.keys(rawHeaders)) {
+	          const lowerName = name.toLowerCase();
+	          if (lowerName === 'content-encoding' || lowerName === 'content-length') {
+	            delete rawHeaders[name];
+	          }
+	        }
+	      }
+	    }
+
 	    if (this.#decompressors.length === 1) {
 	      this.#setupSingleDecompressor(controller);
 	    } else {
@@ -25187,8 +25442,9 @@ function requireDecompress () {
 	   */
 	  onResponseEnd (controller, trailers) {
 	    if (this.#decompressors.length > 0) {
+	      this.#inputEnded = true;
+	      this.#trailers = trailers;
 	      this.#decompressors[0].end();
-	      this.#cleanupDecompressors();
 	      return
 	    }
 	    super.onResponseEnd(controller, trailers);
@@ -25200,12 +25456,15 @@ function requireDecompress () {
 	   * @returns {void}
 	   */
 	  onResponseError (controller, err) {
-	    if (this.#decompressors.length > 0) {
-	      for (const decompressor of this.#decompressors) {
-	        decompressor.destroy(err);
-	      }
-	      this.#cleanupDecompressors();
+	    if (this.#terminated) {
+	      return
 	    }
+
+	    this.#terminated = true;
+	    for (const decompressor of this.#decompressors) {
+	      decompressor.destroy();
+	    }
+	    this.#cleanupDecompressors();
 	    super.onResponseError(controller, err);
 	  }
 	}
@@ -32479,11 +32738,11 @@ function requireUtil$2 () {
 	return util$2;
 }
 
-var parse$2;
+var parse$3;
 var hasRequiredParse;
 
 function requireParse () {
-	if (hasRequiredParse) return parse$2;
+	if (hasRequiredParse) return parse$3;
 	hasRequiredParse = 1;
 
 	const { collectASequenceOfCodePointsFast } = requireInfra();
@@ -32794,11 +33053,11 @@ function requireParse () {
 	  return parseUnparsedAttributes(unparsedAttributes, cookieAttributeList)
 	}
 
-	parse$2 = {
+	parse$3 = {
 	  parseSetCookie,
 	  parseUnparsedAttributes
 	};
-	return parse$2;
+	return parse$3;
 }
 
 var cookies;
@@ -34184,7 +34443,7 @@ function requireConnection () {
 	        // is specified, the server needs to include the same field and one of
 	        // the selected subprotocol values in its response for the connection to
 	        // be established.
-	        if (!requestProtocols.includes(secProtocol)) {
+	        if (requestProtocols === null || !requestProtocols.includes(secProtocol)) {
 	          failWebsocketConnection(handler, 1002, 'Protocol was not set in the opening handshake.');
 	          return
 	        }
@@ -34382,7 +34641,12 @@ function requirePermessageDeflate () {
 
 	        if (this.#maxPayloadSize > 0 && this.#inflate[kLength] > this.#maxPayloadSize) {
 	          callback(new MessageSizeExceededError());
+	          // The inflater may still hold buffered input that can emit a late
+	          // zlib error. Remove the data listener, then deterministically stop
+	          // the stream so a subsequent 'error' cannot fire without a listener
+	          // (which would terminate the process as an unhandled error event).
 	          this.#inflate.removeAllListeners();
+	          this.#inflate.destroy();
 	          this.#inflate = null;
 	          return
 	        }
@@ -35971,9 +36235,9 @@ function requireWebsocketstream () {
 	  /** @type {ReadableStreamDefaultController} */
 	  #readableStreamController
 
-	  // Each WebSocketStream object has an associated writable stream , which is a WritableStream .
-	  /** @type {WritableStream} */
-	  #writableStream
+	  // Retain the controller so the writable stream can be errored while locked.
+	  /** @type {WritableStreamDefaultController} */
+	  #writableStreamController
 
 	  // Each WebSocketStream object has an associated boolean handshake aborted , which is initially false.
 	  #handshakeAborted = false
@@ -36237,6 +36501,9 @@ function requireWebsocketstream () {
 	    // 12. Let writable be a new WritableStream .
 	    // 13. Set up writable with writeAlgorithm , closeAlgorithm , and abortAlgorithm .
 	    const writable = new WritableStream({
+	      start: (controller) => {
+	        this.#writableStreamController = controller;
+	      },
 	      write: (chunk) => this.#write(chunk),
 	      close: () => closeWebSocketConnection(this.#handler, null, null),
 	      abort: (reason) => this.#closeUsingReason(reason)
@@ -36244,9 +36511,6 @@ function requireWebsocketstream () {
 
 	    // Set stream ’s readable stream to readable .
 	    this.#readableStream = readable;
-
-	    // Set stream ’s writable stream to writable .
-	    this.#writableStream = writable;
 
 	    // Resolve stream ’s opened promise with WebSocketOpenInfo «[ " extensions " → extensions , " protocol " → protocol , " readable " → readable , " writable " → writable ]».
 	    this.#openedPromise.resolve({
@@ -36333,9 +36597,7 @@ function requireWebsocketstream () {
 	      this.#readableStreamController.close();
 
 	      // 6.2. Error stream ’s writable stream with an " InvalidStateError " DOMException indicating that a closed WebSocketStream cannot be written to.
-	      if (!this.#writableStream.locked) {
-	        this.#writableStream.abort(new DOMException('A closed WebSocketStream cannot be written to', 'InvalidStateError'));
-	      }
+	      this.#writableStreamController.error(new DOMException('A closed WebSocketStream cannot be written to', 'InvalidStateError'));
 
 	      // 6.3. Resolve stream ’s closed promise with WebSocketCloseInfo «[ " closeCode " → code , " reason " → reason ]».
 	      this.#closedPromise.resolve({
@@ -36352,7 +36614,7 @@ function requireWebsocketstream () {
 	      this.#readableStreamController?.error(error);
 
 	      // 7.3. Error stream ’s writable stream with error .
-	      this.#writableStream?.abort(error);
+	      this.#writableStreamController?.error(error);
 
 	      // 7.4. Reject stream ’s closed promise with error .
 	      this.#closedPromise.reject(error);
@@ -36503,6 +36765,49 @@ function requireEventsourceStream () {
 	 */
 	const SPACE = 0x20;
 
+	const DATA = Buffer.from('data');
+	const EVENT = Buffer.from('event');
+	const ID = Buffer.from('id');
+	const RETRY = Buffer.from('retry');
+
+	function isASCIINumberBytes (buffer, start) {
+	  if (start >= buffer.length) {
+	    return false
+	  }
+
+	  for (let i = start; i < buffer.length; i++) {
+	    if (buffer[i] < 0x30 || buffer[i] > 0x39) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
+	function isValidLastEventIdBytes (buffer, start) {
+	  for (let i = start; i < buffer.length; i++) {
+	    if (buffer[i] === 0x00) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
+	function isFieldName (line, length, field) {
+	  if (length !== field.length) {
+	    return false
+	  }
+
+	  for (let i = 0; i < length; i++) {
+	    if (line[i] !== field[i]) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
 	/**
 	 * @typedef {object} EventSourceStreamEvent
 	 * @type {object}
@@ -36543,11 +36848,14 @@ function requireEventsourceStream () {
 	  eventEndCheck = false
 
 	  /**
-	   * @type {Buffer|null}
+	   * @type {Buffer[]}
 	   */
-	  buffer = null
+	  chunks = []
 
+	  chunkIndex = 0
 	  pos = 0
+	  lineChunkIndex = 0
+	  linePos = 0
 
 	  event = {
 	    data: undefined,
@@ -36587,92 +36895,20 @@ function requireEventsourceStream () {
 	      return
 	    }
 
-	    // Cache the chunk in the buffer, as the data might not be complete while
-	    // processing it
-	    // TODO: Investigate if there is a more performant way to handle
-	    // incoming chunks
-	    // see: https://github.com/nodejs/undici/issues/2630
-	    if (this.buffer) {
-	      this.buffer = Buffer.concat([this.buffer, chunk]);
-	    } else {
-	      this.buffer = chunk;
-	    }
+	    this.chunks.push(chunk);
 
 	    // Strip leading byte-order-mark if we opened the stream and started
 	    // the processing of the incoming data
 	    if (this.checkBOM) {
-	      switch (this.buffer.length) {
-	        case 1:
-	          // Check if the first byte is the same as the first byte of the BOM
-	          if (this.buffer[0] === BOM[0]) {
-	            // If it is, we need to wait for more data
-	            callback();
-	            return
-	          }
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          // BOM anymore
-	          this.checkBOM = false;
-
-	          // The buffer only contains one byte so we need to wait for more data
-	          callback();
-	          return
-	        case 2:
-	          // Check if the first two bytes are the same as the first two bytes
-	          // of the BOM
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1]
-	          ) {
-	            // If it is, we need to wait for more data, because the third byte
-	            // is needed to determine if it is the BOM or not
-	            callback();
-	            return
-	          }
-
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          // BOM anymore
-	          this.checkBOM = false;
-	          break
-	        case 3:
-	          // Check if the first three bytes are the same as the first three
-	          // bytes of the BOM
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1] &&
-	            this.buffer[2] === BOM[2]
-	          ) {
-	            // If it is, we can drop the buffered data, as it is only the BOM
-	            this.buffer = Buffer.alloc(0);
-	            // Set the checkBOM flag to false as we don't need to check for the
-	            // BOM anymore
-	            this.checkBOM = false;
-
-	            // Await more data
-	            callback();
-	            return
-	          }
-	          // If it is not the BOM, we can start processing the data
-	          this.checkBOM = false;
-	          break
-	        default:
-	          // The buffer is longer than 3 bytes, so we can drop the BOM if it is
-	          // present
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1] &&
-	            this.buffer[2] === BOM[2]
-	          ) {
-	            // Remove the BOM from the buffer
-	            this.buffer = this.buffer.subarray(3);
-	          }
-
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          this.checkBOM = false;
-	          break
+	      if (this.handleBOM()) {
+	        callback();
+	        return
 	      }
 	    }
 
-	    while (this.pos < this.buffer.length) {
+	    while (this.hasCurrentByte()) {
+	      const byte = this.currentByte();
+
 	      // If the previous line ended with an end-of-line, we need to check
 	      // if the next character is also an end-of-line.
 	      if (this.eventEndCheck) {
@@ -36685,10 +36921,9 @@ function requireEventsourceStream () {
 	        if (this.crlfCheck) {
 	          // If the current character is a line feed, we can remove it
 	          // from the buffer and reset the crlfCheck flag
-	          if (this.buffer[this.pos] === LF) {
-	            this.buffer = this.buffer.subarray(this.pos + 1);
-	            this.pos = 0;
+	          if (byte === LF) {
 	            this.crlfCheck = false;
+	            this.consumeCurrentByte();
 
 	            // It is possible that the line feed is not the end of the
 	            // event. We need to check if the next character is an
@@ -36704,19 +36939,17 @@ function requireEventsourceStream () {
 	          this.crlfCheck = false;
 	        }
 
-	        if (this.buffer[this.pos] === LF || this.buffer[this.pos] === CR) {
+	        if (byte === LF || byte === CR) {
 	          // If the current character is a carriage return, we need to
 	          // set the crlfCheck flag to true, as we need to check if the
 	          // next character is a line feed so we can remove it from the
 	          // buffer
-	          if (this.buffer[this.pos] === CR) {
+	          if (byte === CR) {
 	            this.crlfCheck = true;
 	          }
 
-	          this.buffer = this.buffer.subarray(this.pos + 1);
-	          this.pos = 0;
-	          if (
-	            this.event.data !== undefined || this.event.event || this.event.id !== undefined || this.event.retry) {
+	          this.consumeCurrentByte();
+	          if (this.hasPendingEvent()) {
 	            this.processEvent(this.event);
 	          }
 	          this.clearEvent();
@@ -36730,22 +36963,18 @@ function requireEventsourceStream () {
 
 	      // If the current character is an end-of-line, we can process the
 	      // line
-	      if (this.buffer[this.pos] === LF || this.buffer[this.pos] === CR) {
+	      if (byte === LF || byte === CR) {
 	        // If the current character is a carriage return, we need to
 	        // set the crlfCheck flag to true, as we need to check if the
 	        // next character is a line feed
-	        if (this.buffer[this.pos] === CR) {
+	        if (byte === CR) {
 	          this.crlfCheck = true;
 	        }
 
 	        // In any case, we can process the line as we reached an
 	        // end-of-line character
-	        this.parseLine(this.buffer.subarray(0, this.pos), this.event);
-
-	        // Remove the processed line from the buffer
-	        this.buffer = this.buffer.subarray(this.pos + 1);
-	        // Reset the position as we removed the processed line from the buffer
-	        this.pos = 0;
+	        this.parseLine(this.readLine(), this.event);
+	        this.consumeCurrentByte();
 	        // A line was processed and this could be the end of the event. We need
 	        // to check if the next line is empty to determine if the event is
 	        // finished.
@@ -36753,7 +36982,7 @@ function requireEventsourceStream () {
 	        continue
 	      }
 
-	      this.pos++;
+	      this.advanceCursor();
 	    }
 
 	    callback();
@@ -36778,64 +37007,53 @@ function requireEventsourceStream () {
 	      return
 	    }
 
-	    let field = '';
-	    let value = '';
+	    let fieldLength = line.length;
+	    let valueStart = line.length;
 
 	    // If the line contains a U+003A COLON character (:)
 	    if (colonPosition !== -1) {
-	      // Collect the characters on the line before the first U+003A COLON
-	      // character (:), and let field be that string.
-	      // TODO: Investigate if there is a more performant way to extract the
-	      // field
-	      // see: https://github.com/nodejs/undici/issues/2630
-	      field = line.subarray(0, colonPosition).toString('utf8');
+	      fieldLength = colonPosition;
 
 	      // Collect the characters on the line after the first U+003A COLON
 	      // character (:), and let value be that string.
 	      // If value starts with a U+0020 SPACE character, remove it from value.
-	      let valueStart = colonPosition + 1;
+	      valueStart = colonPosition + 1;
 	      if (line[valueStart] === SPACE) {
 	        ++valueStart;
 	      }
-	      // TODO: Investigate if there is a more performant way to extract the
-	      // value
-	      // see: https://github.com/nodejs/undici/issues/2630
-	      value = line.subarray(valueStart).toString('utf8');
-
-	      // Otherwise, the string is not empty but does not contain a U+003A COLON
-	      // character (:)
-	    } else {
-	      // Process the field using the steps described below, using the whole
-	      // line as the field name, and the empty string as the field value.
-	      field = line.toString('utf8');
-	      value = '';
 	    }
 
-	    // Modify the event with the field name and value. The value is also
-	    // decoded as UTF-8
-	    switch (field) {
-	      case 'data':
-	        if (event[field] === undefined) {
-	          event[field] = value;
-	        } else {
-	          event[field] += `\n${value}`;
-	        }
-	        break
-	      case 'retry':
-	        if (isASCIINumber(value)) {
-	          event[field] = value;
-	        }
-	        break
-	      case 'id':
-	        if (isValidLastEventId(value)) {
-	          event[field] = value;
-	        }
-	        break
-	      case 'event':
-	        if (value.length > 0) {
-	          event[field] = value;
-	        }
-	        break
+	    if (isFieldName(line, fieldLength, DATA)) {
+	      const value = line.toString('utf8', valueStart);
+
+	      if (event.data === undefined) {
+	        event.data = value;
+	      } else {
+	        event.data += `\n${value}`;
+	      }
+	      return
+	    }
+
+	    if (isFieldName(line, fieldLength, RETRY)) {
+	      if (isASCIINumberBytes(line, valueStart)) {
+	        event.retry = line.toString('utf8', valueStart);
+	      }
+	      return
+	    }
+
+	    if (isFieldName(line, fieldLength, ID)) {
+	      if (isValidLastEventIdBytes(line, valueStart)) {
+	        event.id = line.toString('utf8', valueStart);
+	      }
+	      return
+	    }
+
+	    if (isFieldName(line, fieldLength, EVENT)) {
+	      const value = line.toString('utf8', valueStart);
+
+	      if (value.length > 0) {
+	        event.event = value;
+	      }
 	    }
 	  }
 
@@ -36865,12 +37083,151 @@ function requireEventsourceStream () {
 	  }
 
 	  clearEvent () {
-	    this.event = {
-	      data: undefined,
-	      event: undefined,
-	      id: undefined,
-	      retry: undefined
-	    };
+	    this.event.data = undefined;
+	    this.event.event = undefined;
+	    this.event.id = undefined;
+	    this.event.retry = undefined;
+	  }
+
+	  hasPendingEvent () {
+	    return this.event.data !== undefined ||
+	      this.event.event !== undefined ||
+	      this.event.id !== undefined ||
+	      this.event.retry !== undefined
+	  }
+
+	  hasCurrentByte () {
+	    return this.chunkIndex < this.chunks.length &&
+	      this.pos < this.chunks[this.chunkIndex].length
+	  }
+
+	  currentByte () {
+	    return this.chunks[this.chunkIndex][this.pos]
+	  }
+
+	  consumeCurrentByte () {
+	    this.advanceCursor();
+	    this.syncLineStartToCursor();
+	  }
+
+	  advanceCursor () {
+	    this.pos++;
+
+	    while (this.chunkIndex < this.chunks.length && this.pos >= this.chunks[this.chunkIndex].length) {
+	      this.chunkIndex++;
+	      this.pos = 0;
+	    }
+	  }
+
+	  syncLineStartToCursor () {
+	    this.lineChunkIndex = this.chunkIndex;
+	    this.linePos = this.pos;
+	    this.dropConsumedChunks();
+	  }
+
+	  dropConsumedChunks () {
+	    while (this.lineChunkIndex > 0) {
+	      this.chunks.shift();
+	      this.lineChunkIndex--;
+	      this.chunkIndex--;
+	    }
+
+	    if (this.chunkIndex === this.chunks.length) {
+	      this.chunks.length = 0;
+	      this.chunkIndex = 0;
+	      this.pos = 0;
+	      this.lineChunkIndex = 0;
+	      this.linePos = 0;
+	    }
+	  }
+
+	  readLine () {
+	    if (this.lineChunkIndex === this.chunkIndex) {
+	      return this.chunks[this.chunkIndex].subarray(this.linePos, this.pos)
+	    }
+
+	    const chunks = [];
+	    let length = 0;
+
+	    for (let i = this.lineChunkIndex; i <= this.chunkIndex; i++) {
+	      const chunk = this.chunks[i];
+	      const start = i === this.lineChunkIndex ? this.linePos : 0;
+	      const end = i === this.chunkIndex ? this.pos : chunk.length;
+	      const slice = chunk.subarray(start, end);
+	      length += slice.length;
+	      chunks.push(slice);
+	    }
+
+	    return Buffer.concat(chunks, length)
+	  }
+
+	  peekBufferedByte (offset) {
+	    let chunkIndex = this.lineChunkIndex;
+	    let pos = this.linePos;
+
+	    while (chunkIndex < this.chunks.length) {
+	      const chunk = this.chunks[chunkIndex];
+	      const remaining = chunk.length - pos;
+
+	      if (offset < remaining) {
+	        return chunk[pos + offset]
+	      }
+
+	      offset -= remaining;
+	      chunkIndex++;
+	      pos = 0;
+	    }
+	  }
+
+	  discardLeadingBytes (count) {
+	    while (count > 0 && this.lineChunkIndex < this.chunks.length) {
+	      const chunk = this.chunks[this.lineChunkIndex];
+	      const remaining = chunk.length - this.linePos;
+
+	      if (count < remaining) {
+	        this.linePos += count;
+	        count = 0;
+	      } else {
+	        count -= remaining;
+	        this.lineChunkIndex++;
+	        this.linePos = 0;
+	      }
+	    }
+
+	    this.chunkIndex = this.lineChunkIndex;
+	    this.pos = this.linePos;
+	    this.dropConsumedChunks();
+	  }
+
+	  handleBOM () {
+	    const first = this.peekBufferedByte(0);
+	    const second = this.peekBufferedByte(1);
+	    const third = this.peekBufferedByte(2);
+
+	    if (second === undefined) {
+	      if (first === BOM[0]) {
+	        return true
+	      }
+
+	      this.checkBOM = false;
+	      return true
+	    }
+
+	    if (third === undefined) {
+	      if (first === BOM[0] && second === BOM[1]) {
+	        return true
+	      }
+
+	      this.checkBOM = false;
+	      return false
+	    }
+
+	    if (first === BOM[0] && second === BOM[1] && third === BOM[2]) {
+	      this.discardLeadingBytes(3);
+	    }
+
+	    this.checkBOM = false;
+	    return !this.hasCurrentByte()
 	  }
 	}
 
@@ -38158,7 +38515,7 @@ function isKeyOperator$1(operator) {
 function getValues$1(context, operator, key, modifier) {
   var value = context[key], result = [];
   if (isDefined$1(value) && value !== "") {
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
       value = value.toString();
       if (modifier && modifier !== "*") {
         value = value.substring(0, parseInt(modifier, 10));
@@ -38260,7 +38617,7 @@ function expand$1(template, context) {
 }
 
 // pkg/dist-src/parse.js
-function parse$1(options) {
+function parse$2(options) {
   let method = options.method.toUpperCase();
   let url = (options.url || "/").replace(/:([a-z]\w+)/g, "{$1}");
   let headers = Object.assign({}, options.headers);
@@ -38326,7 +38683,7 @@ function parse$1(options) {
 
 // pkg/dist-src/endpoint-with-defaults.js
 function endpointWithDefaults$1(defaults, route, options) {
-  return parse$1(merge$1(defaults, route, options));
+  return parse$2(merge$1(defaults, route, options));
 }
 
 // pkg/dist-src/with-defaults.js
@@ -38337,192 +38694,702 @@ function withDefaults$4(oldDefaults, newDefaults) {
     DEFAULTS: DEFAULTS2,
     defaults: withDefaults$4.bind(null, DEFAULTS2),
     merge: merge$1.bind(null, DEFAULTS2),
-    parse: parse$1
+    parse: parse$2
   });
 }
 
 // pkg/dist-src/index.js
 var endpoint$1 = withDefaults$4(null, DEFAULTS$1);
 
-var fastContentTypeParse = {};
-
-var hasRequiredFastContentTypeParse;
-
-function requireFastContentTypeParse () {
-	if (hasRequiredFastContentTypeParse) return fastContentTypeParse;
-	hasRequiredFastContentTypeParse = 1;
-
-	const NullObject = function NullObject () { };
-	NullObject.prototype = Object.create(null);
-
-	/**
-	 * RegExp to match *( ";" parameter ) in RFC 7231 sec 3.1.1.1
-	 *
-	 * parameter     = token "=" ( token / quoted-string )
-	 * token         = 1*tchar
-	 * tchar         = "!" / "#" / "$" / "%" / "&" / "'" / "*"
-	 *               / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
-	 *               / DIGIT / ALPHA
-	 *               ; any VCHAR, except delimiters
-	 * quoted-string = DQUOTE *( qdtext / quoted-pair ) DQUOTE
-	 * qdtext        = HTAB / SP / %x21 / %x23-5B / %x5D-7E / obs-text
-	 * obs-text      = %x80-FF
-	 * quoted-pair   = "\" ( HTAB / SP / VCHAR / obs-text )
-	 */
-	const paramRE = /; *([!#$%&'*+.^\w`|~-]+)=("(?:[\v\u0020\u0021\u0023-\u005b\u005d-\u007e\u0080-\u00ff]|\\[\v\u0020-\u00ff])*"|[!#$%&'*+.^\w`|~-]+) */gu;
-
-	/**
-	 * RegExp to match quoted-pair in RFC 7230 sec 3.2.6
-	 *
-	 * quoted-pair = "\" ( HTAB / SP / VCHAR / obs-text )
-	 * obs-text    = %x80-FF
-	 */
-	const quotedPairRE = /\\([\v\u0020-\u00ff])/gu;
-
-	/**
-	 * RegExp to match type in RFC 7231 sec 3.1.1.1
-	 *
-	 * media-type = type "/" subtype
-	 * type       = token
-	 * subtype    = token
-	 */
-	const mediaTypeRE = /^[!#$%&'*+.^\w|~-]+\/[!#$%&'*+.^\w|~-]+$/u;
-
-	// default ContentType to prevent repeated object creation
-	const defaultContentType = { type: '', parameters: new NullObject() };
-	Object.freeze(defaultContentType.parameters);
-	Object.freeze(defaultContentType);
-
-	/**
-	 * Parse media type to object.
-	 *
-	 * @param {string|object} header
-	 * @return {Object}
-	 * @public
-	 */
-
-	function parse (header) {
-	  if (typeof header !== 'string') {
-	    throw new TypeError('argument header is required and must be a string')
-	  }
-
-	  let index = header.indexOf(';');
-	  const type = index !== -1
-	    ? header.slice(0, index).trim()
-	    : header.trim();
-
-	  if (mediaTypeRE.test(type) === false) {
-	    throw new TypeError('invalid media type')
-	  }
-
-	  const result = {
-	    type: type.toLowerCase(),
-	    parameters: new NullObject()
-	  };
-
-	  // parse parameters
-	  if (index === -1) {
-	    return result
-	  }
-
-	  let key;
-	  let match;
-	  let value;
-
-	  paramRE.lastIndex = index;
-
-	  while ((match = paramRE.exec(header))) {
-	    if (match.index !== index) {
-	      throw new TypeError('invalid parameter format')
-	    }
-
-	    index += match[0].length;
-	    key = match[1].toLowerCase();
-	    value = match[2];
-
-	    if (value[0] === '"') {
-	      // remove quotes and escapes
-	      value = value
-	        .slice(1, value.length - 1);
-
-	      quotedPairRE.test(value) && (value = value.replace(quotedPairRE, '$1'));
-	    }
-
-	    result.parameters[key] = value;
-	  }
-
-	  if (index !== header.length) {
-	    throw new TypeError('invalid parameter format')
-	  }
-
-	  return result
-	}
-
-	function safeParse (header) {
-	  if (typeof header !== 'string') {
-	    return defaultContentType
-	  }
-
-	  let index = header.indexOf(';');
-	  const type = index !== -1
-	    ? header.slice(0, index).trim()
-	    : header.trim();
-
-	  if (mediaTypeRE.test(type) === false) {
-	    return defaultContentType
-	  }
-
-	  const result = {
-	    type: type.toLowerCase(),
-	    parameters: new NullObject()
-	  };
-
-	  // parse parameters
-	  if (index === -1) {
-	    return result
-	  }
-
-	  let key;
-	  let match;
-	  let value;
-
-	  paramRE.lastIndex = index;
-
-	  while ((match = paramRE.exec(header))) {
-	    if (match.index !== index) {
-	      return defaultContentType
-	    }
-
-	    index += match[0].length;
-	    key = match[1].toLowerCase();
-	    value = match[2];
-
-	    if (value[0] === '"') {
-	      // remove quotes and escapes
-	      value = value
-	        .slice(1, value.length - 1);
-
-	      quotedPairRE.test(value) && (value = value.replace(quotedPairRE, '$1'));
-	    }
-
-	    result.parameters[key] = value;
-	  }
-
-	  if (index !== header.length) {
-	    return defaultContentType
-	  }
-
-	  return result
-	}
-
-	fastContentTypeParse.default = { parse, safeParse };
-	fastContentTypeParse.parse = parse;
-	fastContentTypeParse.safeParse = safeParse;
-	fastContentTypeParse.defaultContentType = defaultContentType;
-	return fastContentTypeParse;
+/*!
+ * content-type
+ * Copyright(c) 2015 Douglas Christopher Wilson
+ * MIT Licensed
+ */
+/**
+ * Null object perf optimization. Faster than `Object.create(null)` and `{ __proto__: null }`.
+ */
+const NullObject = /* @__PURE__ */ (() => {
+    const C = function () { };
+    C.prototype = Object.create(null);
+    return C;
+})();
+/**
+ * Parse a `Content-Type` header.
+ */
+function parse$1(header, options) {
+    const stopChar = 65_536; // Sentinel for "no stop char".
+    const len = header.length;
+    let index = skipOWS(header, 0, len);
+    const valueStart = index;
+    index = skipValue(header, index, len, stopChar);
+    const valueEnd = trailingOWS(header, valueStart, index);
+    const type = header.slice(valueStart, valueEnd).toLowerCase();
+    return parseParameters(header, type, index, len, stopChar);
+}
+const SP = 32; // " "
+const HTAB = 9; // "\t"
+const SEMI = 59; // ";"
+const EQ = 61; // "="
+const DQUOTE = 34; // '"'
+const BSLASH = 92; // "\\"
+/**
+ * Parses the parameters of a `Content-Type` header starting at the given index.
+ */
+function parseParameters(header, type, index, len, stopChar) {
+    const parameters = new NullObject();
+    parameter: while (index < len) {
+        if (header.charCodeAt(index) === stopChar)
+            break;
+        index = skipOWS(header, index + 1 /* Skip over ; */, len);
+        const keyStart = index;
+        while (index < len) {
+            const code = header.charCodeAt(index);
+            if (code === stopChar)
+                break parameter;
+            if (code === SEMI)
+                continue parameter;
+            if (code === EQ) {
+                const keyEnd = trailingOWS(header, keyStart, index);
+                const key = header.slice(keyStart, keyEnd).toLowerCase();
+                index = skipOWS(header, index + 1, len);
+                if (index < len && header.charCodeAt(index) === DQUOTE) {
+                    index++;
+                    let value = "";
+                    while (index < len) {
+                        const code = header.charCodeAt(index++);
+                        if (code === DQUOTE) {
+                            index = skipValue(header, index, len, stopChar);
+                            if (parameters[key] === undefined)
+                                parameters[key] = value;
+                            break;
+                        }
+                        if (code === BSLASH && index < len) {
+                            value += header[index++];
+                            continue;
+                        }
+                        value += String.fromCharCode(code);
+                    }
+                    continue parameter;
+                }
+                const valueStart = index;
+                index = skipValue(header, index, len, stopChar);
+                if (parameters[key] === undefined) {
+                    const valueEnd = trailingOWS(header, valueStart, index);
+                    parameters[key] = header.slice(valueStart, valueEnd);
+                }
+                continue parameter;
+            }
+            index++;
+        }
+    }
+    return { type, index, parameters };
+}
+/**
+ * Skip over characters until a semicolon or other exit character.
+ */
+function skipValue(str, index, len, stopChar) {
+    while (index < len) {
+        const code = str.charCodeAt(index);
+        if (code === SEMI || code === stopChar)
+            break;
+        index++;
+    }
+    return index;
+}
+/**
+ * Skip optional whitespace (OWS) in an HTTP header value.
+ *
+ * OWS is defined in RFC 9110 sec 5.6.3 as SP (" ") or HTAB ("\t").
+ */
+function skipOWS(header, index, len) {
+    while (index < len) {
+        const char = header.charCodeAt(index);
+        if (char !== SP && char !== HTAB)
+            break;
+        index++;
+    }
+    return index;
+}
+/**
+ * Trim optional whitespace (OWS) from the end of a substring.
+ *
+ * OWS is defined in RFC 9110 sec 5.6.3 as SP (" ") or HTAB ("\t").
+ */
+function trailingOWS(header, start, end) {
+    while (end > start) {
+        const char = header.charCodeAt(end - 1);
+        if (char !== SP && char !== HTAB)
+            break;
+        end--;
+    }
+    return end;
 }
 
-var fastContentTypeParseExports = requireFastContentTypeParse();
+const intRegex = /^-?\d+$/;
+const noiseValue = /^-?\d+n+$/; // Noise - strings that match the custom format before being converted to it
+const originalStringify = JSON.stringify;
+const originalParse = JSON.parse;
+const customFormat = /^-?\d+n$/;
+
+const bigIntsStringify = /([\[:])?"(-?\d+)n"($|\s*[,\}\]])/g;
+const noiseStringify = /([\[:])?("-?\d+n+)n("$|"\s*[,\}\]])/g;
+
+/**
+ * @typedef {(this: any, key: string | number | undefined, value: any) => any} Replacer
+ * @typedef {(key: string | number | undefined, value: any, context?: { source: string }) => any} Reviver
+ */
+
+/**
+ * Checks if a value is unstringifiable according to native JSON.stringify rules.
+ *
+ * @param {any} val The value to check.
+ * @returns {boolean} True if the value is undefined, a function, or a symbol.
+ */
+const isUnstringifiable = (val) =>
+  val === undefined || typeof val === "function" || typeof val === "symbol";
+
+/**
+ * Checks if a value is a native JSON.rawJSON object (Node.js 22+).
+ *
+ * @param {any} val The value to check.
+ * @returns {boolean} True if the value is a RawJSON instance.
+ */
+const isRawJSON = (val) =>
+  val !== null &&
+  typeof val === "object" &&
+  val.constructor &&
+  val.constructor.name === "RawJSON";
+
+/**
+ * Iteratively converts a JS value to a JSON string.
+ * Used as a fallback when the native JSON.stringify hits the Maximum Call Stack size.
+ * Fully compliant with JSON formatting (space), replacers, and toJSON behaviors.
+ *
+ * @param {any} rootValue The value to stringify.
+ * @param {Replacer | Array<string | number> | null} [replacer] User's custom replacer function.
+ * @param {string | number} [spaceParam] Indentation for pretty-printing.
+ * @returns {string | undefined} The generated JSON string.
+ */
+const stringifyIteratively = (rootValue, replacer, spaceParam) => {
+  let space = "";
+  const propertyList = Array.isArray(replacer)
+    ? new Set(replacer.map(String))
+    : null;
+
+  /**
+   * Prepares a value for stringification by resolving toJSON, handling BigInts,
+   * applying custom replacers, and unwrapping primitive objects.
+   *
+   * @param {object|Array} parent The parent object or array holding the value.
+   * @param {string} key The key associated with the value.
+   * @param {any} val The raw value to process.
+   * @returns {any} The processed value ready for stringification.
+   */
+  const prepareVal = (parent, key, val) => {
+    const isObject = val !== null && typeof val === "object";
+    const hasToJSON = isObject && typeof val.toJSON === "function";
+
+    if (hasToJSON) {
+      val = val.toJSON(key);
+    }
+
+    const isNoise = typeof val === "string" && noiseValue.test(val);
+
+    if (isNoise) return val + "n";
+
+    const isBigInt = typeof val === "bigint";
+
+    if (isBigInt) {
+      const supportsRawJSON = "rawJSON" in JSON;
+
+      if (supportsRawJSON) return JSON.rawJSON(val.toString());
+
+      return val.toString() + "n";
+    }
+
+    const isPostReplacerObject = val !== null && typeof val === "object";
+
+    if (isPostReplacerObject) {
+      const isPrimitiveWrapper =
+        val instanceof Number ||
+        val instanceof String ||
+        val instanceof Boolean;
+
+      if (isPrimitiveWrapper) {
+        val = val.valueOf();
+      }
+    }
+
+    return val;
+  };
+
+  const rootProcessed = prepareVal({ }, "", rootValue);
+
+  if (isUnstringifiable(rootProcessed)) {
+    return undefined;
+  }
+
+  const isRootPrimitive =
+    rootProcessed === null || typeof rootProcessed !== "object";
+  const isRootNativeRawJSON = isRawJSON(rootProcessed);
+
+  if (isRootPrimitive || isRootNativeRawJSON) {
+    return originalStringify(rootProcessed);
+  }
+
+  const chunks = [];
+
+  const stack = [
+    {
+      parent: { "": rootProcessed },
+      key: "",
+      val: rootProcessed,
+      isArray: Array.isArray(rootProcessed),
+      keys: Array.isArray(rootProcessed) ? null : Object.keys(rootProcessed),
+      index: 0,
+      first: true,
+    },
+  ];
+
+  const visited = new WeakSet([rootProcessed]);
+
+  while (stack.length > 0) {
+    const node = stack[stack.length - 1];
+
+    if (node.index === 0) {
+      chunks.push(node.isArray ? "[" : "{");
+    }
+
+    let isDone = false;
+
+    if (node.isArray) {
+      if (node.index < node.val.length) {
+        if (!node.first) chunks.push(",");
+
+        const childRaw = node.val[node.index];
+        const childVal = prepareVal(node.val, String(node.index), childRaw);
+
+        if (isUnstringifiable(childVal)) {
+          chunks.push("null");
+          node.first = false;
+          node.index++;
+        } else {
+          const isComplexObject =
+            childVal !== null && typeof childVal === "object";
+          const isNativeRaw = isRawJSON(childVal);
+
+          if (isComplexObject && !isNativeRaw) {
+            if (visited.has(childVal)) {
+              throw new TypeError("Converting circular structure to JSON");
+            }
+
+            visited.add(childVal);
+
+            stack.push({
+              parent: node.val,
+              key: String(node.index),
+              val: childVal,
+              isArray: Array.isArray(childVal),
+              keys: Array.isArray(childVal) ? null : Object.keys(childVal),
+              index: 0,
+              first: true,
+            });
+
+            node.first = false;
+            node.index++;
+          } else {
+            chunks.push(originalStringify(childVal));
+            node.first = false;
+            node.index++;
+          }
+        }
+      } else {
+        isDone = true;
+      }
+    } else {
+      while (node.index < node.keys.length) {
+        const k = node.keys[node.index++];
+
+        const isFilteredOutByArray = propertyList && !propertyList.has(k);
+
+        if (isFilteredOutByArray) continue;
+
+        const childRaw = node.val[k];
+        const childVal = prepareVal(node.val, k, childRaw);
+
+        if (isUnstringifiable(childVal)) continue;
+
+        if (!node.first) chunks.push(",");
+
+        {
+          chunks.push(originalStringify(k) + ":");
+        }
+
+        const isComplexObject =
+          childVal !== null && typeof childVal === "object";
+        const isNativeRaw = isRawJSON(childVal);
+
+        if (isComplexObject && !isNativeRaw) {
+          if (visited.has(childVal)) {
+            throw new TypeError("Converting circular structure to JSON");
+          }
+
+          visited.add(childVal);
+
+          stack.push({
+            parent: node.val,
+            key: k,
+            val: childVal,
+            isArray: Array.isArray(childVal),
+            keys: Array.isArray(childVal) ? null : Object.keys(childVal),
+            index: 0,
+            first: true,
+          });
+
+          node.first = false;
+
+          break; // Stop current loop level to process the newly pushed stack node
+        } else {
+          chunks.push(originalStringify(childVal));
+          node.first = false;
+        }
+      }
+
+      const isNodeFullyProcessed =
+        node.index >= node.keys.length && stack[stack.length - 1] === node;
+
+      if (isNodeFullyProcessed) {
+        isDone = true;
+      }
+    }
+
+    if (isDone) {
+
+      if (!node.first && space) ;
+
+      chunks.push(node.isArray ? "]" : "}");
+      visited.delete(node.val);
+      stack.pop();
+    }
+  }
+
+  return chunks.join("");
+};
+
+/**
+ * Converts a JavaScript value to a JSON string.
+ *
+ * Supports serialization of BigInt values using two strategies:
+ * 1. Custom format "123n" → "123" (universal fallback)
+ * 2. Native JSON.rawJSON() (Node.js 22+, fastest) when available
+ *
+ * All other values are serialized exactly like native JSON.stringify().
+ *
+ * @param {*} value The value to convert to a JSON string.
+ * @param {Replacer | Array<string | number> | null} [replacer]
+ * A function that alters the behavior of the stringification process,
+ * or an array of strings/numbers to indicate properties to exclude.
+ * @param {string | number} [space]
+ * A string or number to specify indentation or pretty-printing.
+ * @returns {string} The JSON string representation.
+ */
+const JSONStringify = (value, replacer, space) => {
+  try {
+    const supportsRawJSON = "rawJSON" in JSON;
+
+    if (supportsRawJSON) {
+      return originalStringify(
+        value,
+        (key, val) => {
+          if (typeof val === "bigint") return JSON.rawJSON(val.toString());
+
+          const hasFunctionReplacer = typeof replacer === "function";
+
+          if (hasFunctionReplacer) ;
+
+          const isKeyInArrayReplacer =
+            Array.isArray(replacer) && replacer.includes(key);
+
+          if (isKeyInArrayReplacer) return val;
+
+          return val;
+        },
+        space,
+      );
+    }
+
+    if (!value) return originalStringify(value, replacer, space);
+
+    const convertedToCustomJSON = originalStringify(
+      value,
+      (key, val) => {
+        const isNoise = typeof val === "string" && noiseValue.test(val);
+
+        if (isNoise) return val.toString() + "n"; // Mark noise values with additional "n" to offset the deletion of one "n" during the processing
+
+        if (typeof val === "bigint") return val.toString() + "n";
+
+        const hasFunctionReplacer = typeof replacer === "function";
+
+        if (hasFunctionReplacer) ;
+
+        const isKeyInArrayReplacer =
+          Array.isArray(replacer) && replacer.includes(key);
+
+        if (isKeyInArrayReplacer) return val;
+
+        return val;
+      },
+      space,
+    );
+
+    const processedJSON = convertedToCustomJSON.replace(
+      bigIntsStringify,
+      "$1$2$3",
+    ); // Delete one "n" off the end of every BigInt value
+
+    const denoisedJSON = processedJSON.replace(noiseStringify, "$1$2$3"); // Remove one "n" off the end of every noisy string
+
+    return denoisedJSON;
+  } catch (error) {
+    if (error instanceof RangeError) {
+      const convertedJSON = stringifyIteratively(value, replacer);
+
+      if (convertedJSON === undefined) return undefined;
+
+      const supportsRawJSON = "rawJSON" in JSON;
+
+      if (supportsRawJSON) return convertedJSON;
+
+      const processedJSON = convertedJSON.replace(bigIntsStringify, "$1$2$3");
+
+      return processedJSON.replace(noiseStringify, "$1$2$3");
+    }
+
+    throw error;
+  }
+};
+
+const featureCache = new Map();
+
+/**
+ * Detects if the current JSON.parse implementation supports the context.source feature.
+ *
+ * Uses toString() fingerprinting to cache results and automatically detect runtime
+ * replacements of JSON.parse (polyfills, mocks, etc.).
+ *
+ * @returns {boolean} true if context.source is supported, false otherwise.
+ */
+const isContextSourceSupported = () => {
+  const parseFingerprint = JSON.parse.toString();
+
+  if (featureCache.has(parseFingerprint)) {
+    return featureCache.get(parseFingerprint);
+  }
+
+  try {
+    const result = JSON.parse(
+      "1",
+      (_, __, context) => !!context?.source && context.source === "1",
+    );
+    featureCache.set(parseFingerprint, result);
+
+    return result;
+  } catch {
+    featureCache.set(parseFingerprint, false);
+
+    return false;
+  }
+};
+
+/**
+ * Reviver function that converts custom-format BigInt strings back to BigInt values.
+ * Also handles "noise" strings that accidentally match the BigInt format.
+ *
+ * @param {string | number | undefined} key The object key.
+ * @param {*} value The value being parsed.
+ * @param {object} [context] Parse context (if supported by JSON.parse).
+ * @param {Reviver} [userReviver] User's custom reviver function.
+ * @returns {any} The transformed value.
+ */
+const convertMarkedBigIntsReviver = (key, value, context, userReviver) => {
+  const isCustomFormatBigInt =
+    typeof value === "string" && customFormat.test(value);
+
+  if (isCustomFormatBigInt) return BigInt(value.slice(0, -1));
+
+  const isNoiseValue = typeof value === "string" && noiseValue.test(value);
+  if (isNoiseValue) return value.slice(0, -1);
+
+  return value;
+};
+
+/**
+ * Fast JSON.parse implementation (~2x faster than classic fallback).
+ * Uses JSON.parse's context.source feature to detect integers and convert
+ * large numbers directly to BigInt without string manipulation.
+ *
+ * Does not support legacy custom format from v1 of this library.
+ *
+ * @param {string} text JSON string to parse.
+ * @param {Reviver} [reviver] Transform function to apply to each value.
+ * @returns {any} Parsed JavaScript value.
+ */
+const JSONParseV2 = (text, reviver) => {
+  return JSON.parse(text, (key, value, context) => {
+    const isNumber = typeof value === "number";
+    const isOutOfBounds =
+      value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER;
+    const isBigNumber = isNumber && isOutOfBounds;
+    const isInt = context && intRegex.test(context.source);
+    const isBigInt = isBigNumber && isInt;
+
+    if (isBigInt) return BigInt(context.source);
+
+    return value;
+  });
+};
+
+const MAX_INT = Number.MAX_SAFE_INTEGER.toString();
+const MAX_DIGITS = MAX_INT.length;
+const stringsOrLargeNumbers =
+  /"(?:[^"\\]|\\.)*"|-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?/g;
+const noiseValueWithQuotes = /^"-?\d+n+"$/; // Noise - strings that match the custom format before being converted to it
+
+/**
+ * Iteratively traverses the parsed object bottom-up (post-order),
+ * emulating the native JSON.parse reviver behavior.
+ * This avoids Call Stack overflows (RangeError) on deeply nested structures.
+ *
+ * @param {any} parsed The natively parsed JSON object.
+ * @param {Reviver} [userReviver] User's custom reviver function.
+ * @returns {any} The fully processed object.
+ */
+const applyReviverIteratively = (parsed, userReviver) => {
+  const rootHolder = { "": parsed };
+  const stack = [{ parent: rootHolder, key: "", visited: false }];
+
+  while (stack.length > 0) {
+    const node = stack[stack.length - 1];
+
+    if (!node.visited) {
+      node.visited = true;
+
+      const value = node.parent[node.key];
+      const isComplexObject = value !== null && typeof value === "object";
+
+      if (isComplexObject) {
+        const keys = Object.keys(value);
+
+        for (let i = keys.length - 1; i >= 0; i--) {
+          stack.push({ parent: value, key: keys[i], visited: false });
+        }
+      }
+    } else {
+      const { parent, key } = node;
+      let value = parent[key];
+
+      if (typeof value === "string") {
+        const isCustomFormatBigInt = customFormat.test(value);
+
+        if (isCustomFormatBigInt) {
+          value = BigInt(value.slice(0, -1));
+        } else {
+          const isNoise = noiseValue.test(value);
+
+          if (isNoise) value = value.slice(0, -1);
+        }
+      }
+
+      const isDeleted = value === undefined;
+
+      if (isDeleted) {
+        delete parent[key];
+      } else {
+        parent[key] = value;
+      }
+
+      stack.pop();
+    }
+  }
+
+  return rootHolder[""];
+};
+
+/**
+ * Pre-processes the JSON string to mark large numbers with an 'n' suffix.
+ *
+ * @param {string} text The raw JSON string.
+ * @returns {string} The serialized string with marked BigInts.
+ */
+const serializeBigInts = (text) => {
+  return text.replace(
+    stringsOrLargeNumbers,
+    (match, digits, fractional, exponential) => {
+      const isString = match[0] === '"';
+      const isNoise = isString && noiseValueWithQuotes.test(match);
+
+      if (isNoise) return match.substring(0, match.length - 1) + 'n"'; // Mark noise values with additional "n" to offset the deletion of one "n" during the processing
+
+      const hasFractionalOrExponential = fractional || exponential;
+
+      // With a fixed number of digits, we can correctly use lexicographical comparison to do a numeric comparison
+      const isLessThanMaxSafeInt =
+        digits &&
+        (digits.length < MAX_DIGITS ||
+          (digits.length === MAX_DIGITS && digits <= MAX_INT));
+
+      const isStandardValue =
+        isString || hasFractionalOrExponential || isLessThanMaxSafeInt;
+
+      if (isStandardValue) return match;
+
+      return '"' + match + 'n"';
+    },
+  );
+};
+
+/**
+ * Converts a JSON string into a JavaScript value.
+ *
+ * Supports parsing of large integers using two strategies:
+ * 1. Classic fallback: Marks large numbers with "123n" format, then converts to BigInt
+ * 2. Fast path (JSONParseV2): Uses context.source feature (~2x faster) when available
+ *
+ * All other JSON values are parsed exactly like native JSON.parse().
+ *
+ * @param {string} text A valid JSON string.
+ * @param {Reviver} [reviver]
+ * A function that transforms the results. This function is called for each member
+ * of the object. If a member contains nested objects, the nested objects are
+ * transformed before the parent object is.
+ * @returns {any} The parsed JavaScript value.
+ * @throws {SyntaxError} If text is not valid JSON.
+ */
+const JSONParse = (text, reviver) => {
+  if (!text) return originalParse(text, reviver);
+
+  try {
+    if (isContextSourceSupported()) return JSONParseV2(text, reviver); // Shortcut to a faster (2x) and simpler version
+
+    // Find and mark big numbers with "n"
+    const serializedData = serializeBigInts(text);
+
+    return originalParse(serializedData, (key, value, context) =>
+      convertMarkedBigIntsReviver(key, value, context, reviver),
+    );
+  } catch (error) {
+    if (error instanceof RangeError) {
+      const serializedData = serializeBigInts(text);
+      const parsed = originalParse(serializedData);
+
+      return applyReviverIteratively(parsed);
+    }
+
+    throw error;
+  }
+};
 
 let RequestError$1 = class RequestError extends Error {
   name;
@@ -38566,7 +39433,7 @@ let RequestError$1 = class RequestError extends Error {
 // pkg/dist-src/index.js
 
 // pkg/dist-src/version.js
-var VERSION$8 = "10.0.7";
+var VERSION$8 = "10.0.16";
 
 // pkg/dist-src/defaults.js
 var defaults_default$1 = {
@@ -38594,7 +39461,7 @@ async function fetchWrapper$1(requestOptions) {
   }
   const log = requestOptions.request?.log || console;
   const parseSuccessResponseBody = requestOptions.request?.parseSuccessResponseBody !== false;
-  const body = isPlainObject$2(requestOptions.body) || Array.isArray(requestOptions.body) ? JSON.stringify(requestOptions.body) : requestOptions.body;
+  const body = isPlainObject$2(requestOptions.body) || Array.isArray(requestOptions.body) ? JSONStringify(requestOptions.body) : requestOptions.body;
   const requestHeaders = Object.fromEntries(
     Object.entries(requestOptions.headers).map(([name, value]) => [
       name,
@@ -38688,16 +39555,19 @@ async function getResponseData$1(response) {
   if (!contentType) {
     return response.text().catch(noop$2);
   }
-  const mimetype = fastContentTypeParseExports.safeParse(contentType);
+  const mimetype = parse$1(contentType);
   if (isJSONResponse$1(mimetype)) {
     let text = "";
     try {
       text = await response.text();
-      return JSON.parse(text);
+      return JSONParse(text);
     } catch (err) {
       return text;
     }
-  } else if (mimetype.type.startsWith("text/") || mimetype.parameters.charset?.toLowerCase() === "utf-8") {
+  } else if (mimetype.type.startsWith("text/") || // `application/octet-stream` is the canonical "arbitrary binary" type
+  // (RFC 2046) and must never be decoded as text, even when the response
+  // carries a (misleading) `charset=utf-8` parameter — see #751.
+  mimetype.parameters.charset?.toLowerCase() === "utf-8" && mimetype.type !== "application/octet-stream") {
     return response.text().catch(noop$2);
   } else {
     return response.arrayBuffer().catch(
@@ -38716,9 +39586,10 @@ function toErrorMessage$1(data) {
   if (data instanceof ArrayBuffer) {
     return "Unknown error";
   }
-  if ("message" in data) {
-    const suffix = "documentation_url" in data ? ` - ${data.documentation_url}` : "";
-    return Array.isArray(data.errors) ? `${data.message}: ${data.errors.map((v) => JSON.stringify(v)).join(", ")}${suffix}` : `${data.message}${suffix}`;
+  if (typeof data === "object" && data !== null && "message" in data) {
+    const objectData = data;
+    const suffix = "documentation_url" in objectData ? ` - ${objectData.documentation_url}` : "";
+    return Array.isArray(objectData.errors) ? `${objectData.message}: ${objectData.errors.map((v) => JSON.stringify(v)).join(", ")}${suffix}` : `${objectData.message}${suffix}`;
   }
   return `Unknown error: ${JSON.stringify(data)}`;
 }
@@ -38910,7 +39781,7 @@ function isKeyOperator(operator) {
 function getValues(context, operator, key, modifier) {
   var value = context[key], result = [];
   if (isDefined(value) && value !== "") {
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
       value = value.toString();
       if (modifier && modifier !== "*") {
         value = value.substring(0, parseInt(modifier, 10));
@@ -39138,7 +40009,7 @@ class RequestError extends Error {
 // pkg/dist-src/index.js
 
 // pkg/dist-src/version.js
-var VERSION$6 = "10.0.7";
+var VERSION$6 = "10.0.16";
 
 // pkg/dist-src/defaults.js
 var defaults_default = {
@@ -39166,7 +40037,7 @@ async function fetchWrapper(requestOptions) {
   }
   const log = requestOptions.request?.log || console;
   const parseSuccessResponseBody = requestOptions.request?.parseSuccessResponseBody !== false;
-  const body = isPlainObject(requestOptions.body) || Array.isArray(requestOptions.body) ? JSON.stringify(requestOptions.body) : requestOptions.body;
+  const body = isPlainObject(requestOptions.body) || Array.isArray(requestOptions.body) ? JSONStringify(requestOptions.body) : requestOptions.body;
   const requestHeaders = Object.fromEntries(
     Object.entries(requestOptions.headers).map(([name, value]) => [
       name,
@@ -39260,16 +40131,19 @@ async function getResponseData(response) {
   if (!contentType) {
     return response.text().catch(noop$1);
   }
-  const mimetype = fastContentTypeParseExports.safeParse(contentType);
+  const mimetype = parse$1(contentType);
   if (isJSONResponse(mimetype)) {
     let text = "";
     try {
       text = await response.text();
-      return JSON.parse(text);
+      return JSONParse(text);
     } catch (err) {
       return text;
     }
-  } else if (mimetype.type.startsWith("text/") || mimetype.parameters.charset?.toLowerCase() === "utf-8") {
+  } else if (mimetype.type.startsWith("text/") || // `application/octet-stream` is the canonical "arbitrary binary" type
+  // (RFC 2046) and must never be decoded as text, even when the response
+  // carries a (misleading) `charset=utf-8` parameter — see #751.
+  mimetype.parameters.charset?.toLowerCase() === "utf-8" && mimetype.type !== "application/octet-stream") {
     return response.text().catch(noop$1);
   } else {
     return response.arrayBuffer().catch(
@@ -39288,9 +40162,10 @@ function toErrorMessage(data) {
   if (data instanceof ArrayBuffer) {
     return "Unknown error";
   }
-  if ("message" in data) {
-    const suffix = "documentation_url" in data ? ` - ${data.documentation_url}` : "";
-    return Array.isArray(data.errors) ? `${data.message}: ${data.errors.map((v) => JSON.stringify(v)).join(", ")}${suffix}` : `${data.message}${suffix}`;
+  if (typeof data === "object" && data !== null && "message" in data) {
+    const objectData = data;
+    const suffix = "documentation_url" in objectData ? ` - ${objectData.documentation_url}` : "";
+    return Array.isArray(objectData.errors) ? `${objectData.message}: ${objectData.errors.map((v) => JSON.stringify(v)).join(", ")}${suffix}` : `${objectData.message}${suffix}`;
   }
   return `Unknown error: ${JSON.stringify(data)}`;
 }
@@ -39347,6 +40222,9 @@ var GraphqlResponseError = class extends Error {
       Error.captureStackTrace(this, this.constructor);
     }
   }
+  request;
+  headers;
+  response;
   name = "GraphqlResponseError";
   errors;
   data;
@@ -39441,6 +40319,7 @@ function withCustomRequest(customRequest) {
     url: "/graphql"
   });
 }
+/* v8 ignore if -- @preserve */
 
 // pkg/dist-src/is-jwt.js
 var b64url = "(?:[a-zA-Z0-9_-]+)";
@@ -39495,7 +40374,7 @@ var createTokenAuth = function createTokenAuth2(token) {
   });
 };
 
-const VERSION$4 = "7.0.6";
+const VERSION$4 = "7.0.8";
 
 const noop = () => {
 };
