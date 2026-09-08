@@ -43,6 +43,25 @@ const stubSqliteCacheStore = () => ({
 
 const config = {
   input: 'src/index.ts',
+  // Suppress warnings that originate from third-party code in node_modules.
+  // - THIS_IS_UNDEFINED: TypeScript's `__awaiter` helper in CommonJS deps
+  //   (e.g. @actions/core) references top-level `this`, which is legal in CJS.
+  // - CIRCULAR_DEPENDENCY: @actions/core <-> oidc-utils is intentional upstream.
+  onwarn(warning, warn) {
+    const id = warning.id ?? warning.loc?.file ?? ''
+    const fromDeps =
+      id.includes('node_modules') ||
+      warning.ids?.every((i) => i.includes('node_modules')) === true
+
+    if (
+      fromDeps &&
+      (warning.code === 'THIS_IS_UNDEFINED' ||
+        warning.code === 'CIRCULAR_DEPENDENCY')
+    )
+      return
+
+    warn(warning)
+  },
   output: {
     esModule: true,
     file: 'dist/index.js',
